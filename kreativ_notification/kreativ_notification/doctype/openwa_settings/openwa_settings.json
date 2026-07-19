@@ -1,0 +1,202 @@
+{
+  "actions": [],
+  "allow_bulk_edit": 1,
+  "allow_copy": 1,
+  "allow_events_in_timeline": 1,
+  "allow_import": 1,
+  "allow_rename": 1,
+  "autoname": "format:OWS-{####}",
+  "creation": "2026-07-19 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "enabled",
+    "base_url",
+    "api_key",
+    "session_id",
+    "chat_id",
+    "test_mode",
+    "send_salary_slips",
+    "salary_slip_print_format",
+    "default_country_code",
+    "notify_on",
+    "section_break_webhook",
+    "webhook_enabled",
+    "webhook_secret",
+    "auto_reply_enabled",
+    "inbound_webhook_url",
+    "section_break_bot",
+    "invoice_keywords",
+    "ledger_keywords",
+    "allowed_roles"
+  ],
+  "fields": [
+    {
+      "fieldname": "enabled",
+      "fieldtype": "Check",
+      "label": "Enabled",
+      "default": 0
+    },
+    {
+      "fieldname": "base_url",
+      "fieldtype": "Data",
+      "label": "OpenWA Base URL",
+      "default": "http://localhost:2785",
+      "description": "OpenWA gateway base URL (e.g., http://localhost:2785)"
+    },
+    {
+      "fieldname": "api_key",
+      "fieldtype": "Password",
+      "label": "API Key",
+      "description": "OpenWA API key for authentication"
+    },
+    {
+      "fieldname": "session_id",
+      "fieldtype": "Data",
+      "label": "Session ID",
+      "default": "default",
+      "description": "WhatsApp session ID on OpenWA"
+    },
+    {
+      "fieldname": "chat_id",
+      "fieldtype": "Data",
+      "label": "Default Chat ID",
+      "default": "919106526195@c.us",
+      "description": "Default recipient for admin/test messages"
+    },
+    {
+      "fieldname": "test_mode",
+      "fieldtype": "Check",
+      "label": "Test Mode",
+      "default": 0
+    },
+    {
+      "fieldname": "send_salary_slips",
+      "fieldtype": "Check",
+      "label": "Send Salary Slips",
+      "default": 1
+    },
+    {
+      "fieldname": "salary_slip_print_format",
+      "fieldtype": "Link",
+      "label": "Salary Slip Print Format",
+      "options": "Print Format",
+      "default": "Standard"
+    },
+    {
+      "fieldname": "default_country_code",
+      "fieldtype": "Data",
+      "label": "Default Country Code",
+      "default": "91",
+      "description": "Prepended to 10-digit mobile numbers (e.g., 91 for India)"
+    },
+    {
+      "fieldname": "notify_on",
+      "fieldtype": "Select",
+      "label": "Notify On",
+      "options": "Both\nIN only\nOUT only",
+      "default": "Both"
+    },
+    {
+      "fieldname": "section_break_webhook",
+      "fieldtype": "Section Break",
+      "label": "Inbound Webhook"
+    },
+    {
+      "fieldname": "webhook_enabled",
+      "fieldtype": "Check",
+      "label": "Webhook Enabled",
+      "default": 0
+    },
+    {
+      "fieldname": "webhook_secret",
+      "fieldtype": "Password",
+      "label": "Webhook Secret (HMAC)",
+      "description": "HMAC SHA256 secret for signature validation"
+    },
+    {
+      "fieldname": "auto_reply_enabled",
+      "fieldtype": "Check",
+      "label": "Auto Reply Enabled",
+      "default": 1
+    },
+    {
+      "fieldname": "inbound_webhook_url",
+      "fieldtype": "Data",
+      "label": "Inbound Webhook URL",
+      "description": "Public URL for OpenWA to POST to",
+      "default": ""
+    },
+    {
+      "fieldname": "section_break_bot",
+      "fieldtype": "Section Break",
+      "label": "Bot Keywords"
+    },
+    {
+      "fieldname": "invoice_keywords",
+      "fieldtype": "Data",
+      "label": "Invoice Keywords",
+      "default": "invoice,inv,बिल",
+      "description": "Comma-separated keywords to trigger invoice bot"
+    },
+    {
+      "fieldname": "ledger_keywords",
+      "fieldtype": "Data",
+      "label": "Ledger Keywords",
+      "default": "ledger,statement,account,balance,बही",
+      "description": "Comma-separated keywords to trigger ledger bot"
+    },
+    {
+      "fieldname": "allowed_roles",
+      "fieldtype": "Table MultiSelect",
+      "label": "Allowed Roles",
+      "options": "Role",
+      "description": "Roles allowed to use inbound bot"
+    }
+  ],
+  "issingle": 1,
+  "modified": "2026-07-19 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Kreativ Notification",
+  "name": "OpenWA Settings",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "System Manager",
+      "share": 1,
+      "write": 1
+    },
+    {
+      "create": 0,
+      "delete": 0,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "WhatsApp Manager",
+      "share": 0,
+      "write": 1
+    },
+    {
+      "create": 0,
+      "delete": 0,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "WhatsApp User",
+      "share": 0,
+      "write": 0
+    }
+  ],
+  "quick_entry": 0,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1
+}

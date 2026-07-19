@@ -1,0 +1,131 @@
+{
+  "actions": [],
+  "allow_bulk_edit": 1,
+  "allow_copy": 1,
+  "allow_events_in_timeline": 1,
+  "allow_import": 1,
+  "allow_rename": 1,
+  "autoname": "format:WSL-{####}",
+  "creation": "2026-07-19 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "source_doctype",
+    "source_docname",
+    "recipient",
+    "recipient_display",
+    "message_type",
+    "source_print_format",
+    "status",
+    "error_message",
+    "retry_count",
+    "meta"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_doctype",
+      "fieldtype": "Link",
+      "label": "Source DocType",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_docname",
+      "fieldtype": "Data",
+      "label": "Source DocName",
+      "reqd": 1
+    },
+    {
+      "fieldname": "recipient",
+      "fieldtype": "Data",
+      "label": "Recipient",
+      "reqd": 1
+    },
+    {
+      "fieldname": "recipient_display",
+      "fieldtype": "Data",
+      "label": "Recipient Display"
+    },
+    {
+      "fieldname": "message_type",
+      "fieldtype": "Select",
+      "label": "Message Type",
+      "options": "Print PDF\nDispatch PDF\nScreenshot\nCustom\nTest",
+      "default": "Print PDF"
+    },
+    {
+      "fieldname": "source_print_format",
+      "fieldtype": "Data",
+      "label": "Source Print Format"
+    },
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "label": "Status",
+      "options": "Queued\nProcessing\nSent\nFailed",
+      "default": "Queued"
+    },
+    {
+      "fieldname": "error_message",
+      "fieldtype": "Long Text",
+      "label": "Error Message"
+    },
+    {
+      "fieldname": "retry_count",
+      "fieldtype": "Int",
+      "label": "Retry Count",
+      "default": 0
+    },
+    {
+      "fieldname": "meta",
+      "fieldtype": "Long Text",
+      "label": "Meta"
+    }
+  ],
+  "issingle": 0,
+  "istable": 0,
+  "modified": "2026-07-19 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Kreativ Notification",
+  "name": "WhatsApp Send Log",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "System Manager",
+      "share": 1,
+      "write": 1
+    },
+    {
+      "create": 0,
+      "delete": 0,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "WhatsApp Manager",
+      "share": 0,
+      "write": 1
+    },
+    {
+      "create": 0,
+      "delete": 0,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "WhatsApp User",
+      "share": 0,
+      "write": 0
+    }
+  ],
+  "quick_entry": 0,
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "track_changes": 1
+}
