@@ -55,14 +55,6 @@ scheduler_events = {
     ],
 }
 
-# Document Events
-doc_events = {
-    "Notification Rule": {
-        "on_update": "kreativ_notification.notification.rules_engine.clear_rule_cache",
-        "on_trash": "kreativ_notification.notification.rules_engine.clear_rule_cache",
-    },
-}
-
 # Custom Fields
 custom_fields = {
     "Employee Checkin": [
