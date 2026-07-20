@@ -183,9 +183,13 @@ def _handle_invoice_request(reply_to: str, identifier: str):
         increment_circuit_breaker()
         return
 
+    # Get configured print format (defaults to "Standard" if not set)
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    print_format = settings.invoice_print_format or "Standard"
+
     try:
         frappe.set_user("Administrator")
-        pdf_bytes = generate_pdf_bytes("Sales Invoice", invoice_name, "Standard")
+        pdf_bytes = generate_pdf_bytes("Sales Invoice", invoice_name, print_format)
         frappe.set_user(None)
         if isinstance(pdf_bytes, bytes):
             base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
@@ -206,7 +210,7 @@ def _handle_invoice_request(reply_to: str, identifier: str):
         chat_id_override=reply_to,
         source_doctype="Sales Invoice",
         source_docname=invoice_name,
-        source_print_format="Standard",
+        source_print_format=print_format,
     )
 
     if result.get("success"):

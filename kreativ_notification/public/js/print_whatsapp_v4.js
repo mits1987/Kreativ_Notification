@@ -170,7 +170,7 @@
 
                 // Server-side validation via phonenumbers library
                 frappe.call({
-                    method: "gravures_custom.overrides.validate_phone_number",
+                    method: "kreativ_notification.api.validate_phone_number",
                     args: { phone: clean },
                     callback: function (r) {
                         $btn.prop("disabled", false).html("Send");
@@ -236,7 +236,7 @@
 
         // Fetch chats from backend
         frappe.call({
-            method: "gravures_custom.overrides.get_whatsapp_chats",
+            method: "kreativ_notification.api.get_whatsapp_chats",
             callback: function (r) {
                 if (!r.message) {
                     d.fields_dict.picker_html.$wrapper.html(
@@ -415,7 +415,7 @@
         $picker.html('<div style="text-align:center;padding:30px;color:#999;font-size:13px;">Searching contacts...</div>');
 
         frappe.call({
-            method: "gravures_custom.overrides.search_whatsapp_contacts",
+            method: "kreativ_notification.api.search_whatsapp_contacts",
             args: { query: query },
             callback: function (r) {
                 if (!r.message) {
@@ -451,7 +451,7 @@
                 frappe.show_alert({ message: "Sending PDF to " + safeChatName + "...", indicator: "blue" });
 
                 frappe.call({
-                    method: "gravures_custom.overrides.send_print_pdf_whatsapp",
+                    method: "kreativ_notification.api.send_print_pdf_whatsapp",
                     args: {
                         doctype: doctype,
                         name: name,

@@ -13,6 +13,9 @@ def create_log(
     meta: dict = None,
 ) -> str:
     """Create a WhatsApp Send Log entry and return its name."""
+    # "System" is not a valid DocType, use "DocType" for test/system messages
+    if source_doctype == "System":
+        source_doctype = "DocType"
     try:
         log = frappe.get_doc({
             "doctype": "WhatsApp Send Log",

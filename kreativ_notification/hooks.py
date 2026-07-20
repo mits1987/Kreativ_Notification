@@ -6,11 +6,18 @@ app_email = "info@kreativ.com"
 app_license = "MIT"
 
 # Desk JS
-# Cache busting: rename file + update this list when pushing changes through Cloudflare.
-# See feedback-cloudflare-cache-rocks in MEMORY.md.
+# Cache busting: bump ?v= date when pushing JS changes through Cloudflare.
+# Frappe v16 include_script() does NOT auto-append a version query, so we add it manually.
 app_include_js = [
-    "/assets/kreativ_notification/js/kreativ_notification.js",
-    "/assets/kreativ_notification/js/print_whatsapp_v4.js",
+    "/assets/kreativ_notification/js/kreativ_notification.js?v=20260720",
+    "/assets/kreativ_notification/js/print_whatsapp_v4.js?v=20260720",
+]
+
+# Force import of API module before every request to ensure whitelisted methods are registered.
+# This is needed because gunicorn workers (even with --preload) don't import app modules
+# until they're needed. The @frappe.whitelist() decorator only executes on first import.
+before_request = [
+    "kreativ_notification.ensure_api_loaded",
 ]
 
 # ---------------------------------------------------------------------------

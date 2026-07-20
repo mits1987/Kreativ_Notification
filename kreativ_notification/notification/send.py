@@ -133,7 +133,7 @@ def send_test_message() -> dict:
 
     log_name = _create_log(
         source_doctype="System",
-        source_docname="",
+        source_docname="test",
         recipient=settings.chat_id,
         message_type="Test",
         meta={"type": "test"},
