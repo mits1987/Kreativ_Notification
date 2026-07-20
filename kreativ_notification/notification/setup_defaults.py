@@ -92,6 +92,8 @@ def _ensure_rule(name: str, **kwargs) -> str:
 
 
 def _ensure_salary_slip(channel: str):
+    if not frappe.db.exists("DocType", "Salary Slip"):
+        return
     tpl = _ensure_template(
         "Salary Slip WhatsApp",
         "Salary Slip",
@@ -119,6 +121,8 @@ def _ensure_salary_slip(channel: str):
 
 
 def _ensure_checkin(channel: str):
+    if not frappe.db.exists("DocType", "Employee Checkin"):
+        return
     tpl = _ensure_template(
         "Checkin WhatsApp",
         "Employee Checkin",
