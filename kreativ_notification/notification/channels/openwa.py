@@ -1,7 +1,24 @@
 """OpenWA (self-hosted, unofficial WhatsApp) driver.
 
-Credentials come from the Notification Channel document. For backwards
-compatibility, blank fields fall back to the legacy OpenWA Settings single.
+v2 — UNIFIED HTTP PATH. This driver no longer makes its own raw
+requests.post() calls: all gateway HTTP goes through OpenWAClient in
+notification/openwa_client.py, which is now the ONE place that knows the
+OpenWA REST surface, timeouts, and error normalisation. The driver's job
+shrinks to what a driver should do:
+
+    - resolve credentials (Notification Channel, legacy Settings fallback)
+    - normalise recipients (number -> chat_id)
+    - translate the client's {"success", "data"/"error"} dicts into
+      SendResult for the dispatcher
+
+Per the BaseChannelDriver contract this driver NEVER raises for delivery
+failures and never touches the Send Log or circuit breaker — the
+dispatcher owns state. (The gateway-level breaker in openwa_client.py is
+used by health checks and the inbound bot, not by dispatch delivery;
+see the note at the top of openwa_client.py.)
+
+REQUIRES the openwa_client.py __init__ patch (ADDENDUM.md §1) so
+OpenWAClient accepts explicit (base_url, api_key, session_id).
 """
 
 from __future__ import annotations
@@ -9,11 +26,12 @@ from __future__ import annotations
 import re
 
 import frappe
-import requests
 
 from kreativ_notification.notification.channels.base import BaseChannelDriver, SendResult
+from kreativ_notification.notification.openwa_client import OpenWAClient
 
-REQUEST_TIMEOUT = 30
+# Chat-id suffixes OpenWA uses; inbound reply_to may carry any of these.
+CHAT_ID_SUFFIXES = ("@c.us", "@g.us", "@lid", "@s.whatsapp.net")
 
 
 class OpenWADriver(BaseChannelDriver):
@@ -40,64 +58,67 @@ class OpenWADriver(BaseChannelDriver):
 
         return base_url.rstrip("/"), api_key, session_id
 
-    def _post(self, endpoint: str, payload: dict) -> SendResult:
+    def _client(self) -> OpenWAClient | SendResult:
+        """Build a client for this channel's credentials, or a permanent
+        SendResult failure if the channel is unconfigured."""
         base_url, api_key, session_id = self._config()
         if not base_url:
             return SendResult.fail("OpenWA Base URL is not configured.", permanent=True)
+        if not api_key:
+            return SendResult.fail("OpenWA API Key is not configured.", permanent=True)
+        return OpenWAClient(base_url=base_url, api_key=api_key, session_id=session_id)
 
-        url = f"{base_url}/api/sessions/{session_id}/messages/{endpoint}"
+    @staticmethod
+    def _to_result(res: dict) -> SendResult:
+        """OpenWAClient dict -> dispatcher SendResult."""
+        if res.get("success"):
+            data = res.get("data") or {}
+            return SendResult.ok(message_id=data.get("messageId"), raw=data)
+        return SendResult.fail(res.get("error") or "OpenWA send failed", raw=res)
+
+    def _send(self, method: str, *args, **kwargs) -> SendResult:
+        client = self._client()
+        if isinstance(client, SendResult):  # unconfigured -> permanent fail
+            return client
         try:
-            r = requests.post(url, json=payload,
-                              headers={"X-API-Key": api_key},
-                              timeout=REQUEST_TIMEOUT)
-        except requests.RequestException as e:
-            return SendResult.fail(f"OpenWA unreachable: {e}")
-
-        if not r.ok:
-            return SendResult.fail(f"OpenWA HTTP {r.status_code}: {r.text[:300]}")
-
-        try:
-            data = r.json()
-        except ValueError:
-            data = {}
-        return SendResult.ok(message_id=(data or {}).get("messageId"), raw=data)
+            return self._to_result(getattr(client, method)(*args, **kwargs))
+        except Exception as e:
+            # Contract: never raise for delivery failures.
+            return SendResult.fail(f"OpenWA driver error: {e}")
 
     # ------------------------------------------------------------------
     # Sending
     # ------------------------------------------------------------------
 
     def send_text(self, recipient: str, text: str, **kwargs) -> SendResult:
-        return self._post("send-text", {"chatId": recipient, "text": text})
+        return self._send("send_text", recipient, text)
 
     def send_document(self, recipient: str, file_b64: str, filename: str,
                       mimetype: str = "application/pdf", caption: str = "",
                       **kwargs) -> SendResult:
-        return self._post("send-document", {
-            "chatId": recipient,
-            "base64": file_b64,
-            "filename": filename,
-            "mimetype": mimetype,
-            "caption": caption,
-        })
+        return self._send("send_document", recipient, file_b64, filename,
+                          mimetype=mimetype, caption=caption)
 
     def send_image(self, recipient: str, image_b64: str, filename: str,
                    caption: str = "", **kwargs) -> SendResult:
-        return self._post("send-image", {
-            "chatId": recipient,
-            "base64": image_b64,
-            "filename": filename,
-            "caption": caption,
-        })
+        return self._send("send_image", recipient, image_b64, filename,
+                          caption=caption)
 
     # ------------------------------------------------------------------
-    # Recipient normalisation: mobile number → chat_id
+    # Recipient normalisation: mobile number -> chat_id
     # ------------------------------------------------------------------
 
     def normalize_recipient(self, raw: str) -> str | None:
         raw = (raw or "").strip()
         if not raw:
             return None
-        if raw.endswith("@c.us") or raw.endswith("@g.us"):
+        # FIX v2: pass through ALL chat-id forms. The old version only
+        # recognised @c.us/@g.us — an inbound reply_to like
+        # "123456789@lid" was digit-stripped and rebuilt as a wrong
+        # "...@c.us" address. @lid and @s.whatsapp.net are valid inbound
+        # sender forms (see inbound.py's valid_suffixes) and must be
+        # replied to verbatim.
+        if raw.endswith(CHAT_ID_SUFFIXES):
             return raw
 
         digits = re.sub(r"\D", "", raw)
@@ -105,7 +126,7 @@ class OpenWADriver(BaseChannelDriver):
             return None
 
         country_code = re.sub(r"\D", "", self.channel.default_country_code or "91")
-        # 10-digit local number → prefix country code
+        # 10-digit local number -> prefix country code
         if len(digits) == 10:
             digits = country_code + digits
         return f"{digits}@c.us"
@@ -115,14 +136,12 @@ class OpenWADriver(BaseChannelDriver):
     # ------------------------------------------------------------------
 
     def get_health(self) -> dict:
-        base_url, api_key, session_id = self._config()
-        if not base_url:
-            return {"healthy": False, "status": "unconfigured", "detail": "No base URL"}
+        client = self._client()
+        if isinstance(client, SendResult):
+            return {"healthy": False, "status": "unconfigured",
+                    "detail": client.get("error") or "No base URL / API key"}
         try:
-            r = requests.get(f"{base_url}/api/sessions/{session_id}/status",
-                             headers={"X-API-Key": api_key}, timeout=10)
-            data = r.json() if r.ok else {}
-            status = (data.get("status") or "unknown").lower()
+            status = (client.get_session_state() or {}).get("status", "unknown").lower()
             return {
                 "healthy": status in ("ready", "connected"),
                 "status": status,

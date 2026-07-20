@@ -93,17 +93,19 @@ def dispatch(
             if fallback_channel else None
         ),
         "notification_rule": rule,
-        "meta": frappe.as_json({
-            "text": text,
-            "subject": subject,
-            "filename": filename,
-            "mimetype": mimetype,
-            "has_file": bool(file_b64),
-            "meta_template_name": meta_template_name,
-            "meta_template_language": meta_template_language,
-        }),
     })
     log.insert(ignore_permissions=True)
+    # Use db_set for 'meta' field to avoid conflict with Document.meta property
+    frappe.db.set_value(LOG_DOCTYPE, log.name, "meta", frappe.as_json({
+        "text": text,
+        "subject": subject,
+        "filename": filename,
+        "mimetype": mimetype,
+        "has_file": bool(file_b64),
+        "meta_template_name": meta_template_name,
+        "meta_template_language": meta_template_language,
+    }))
+    frappe.db.commit()
 
     # Payload (incl. base64 file) goes to cache, not the DB row
     if file_b64:
@@ -278,7 +280,8 @@ def process_due_retries():
     due = frappe.get_all(
         LOG_DOCTYPE,
         filters={"status": "Queued",
-                 "retry_after": ["<=", now_datetime()]},
+                 "retry_after": ["<=", now_datetime()],
+                 "channel": ["is", "set"]},
         or_filters=None,
         fields=["name", "priority"],
         order_by="creation asc",
@@ -289,7 +292,8 @@ def process_due_retries():
     fresh = frappe.get_all(
         LOG_DOCTYPE,
         filters={"status": "Queued", "retry_after": ["is", "not set"],
-                 "creation": ["<", add_to_date(now_datetime(), minutes=-10)]},
+                 "creation": ["<", add_to_date(now_datetime(), minutes=-10)],
+                 "channel": ["is", "set"]},
         fields=["name", "priority"],
         limit_page_length=100,
     )
@@ -396,11 +400,20 @@ def _rate_limit_ok(channel: str) -> bool:
     if not limit:
         return True
     key = f"notif_rate:{frappe.local.site}:{channel}"
-    current = cint(frappe.cache().get_value(key) or 0)
-    if current >= limit:
-        return False
-    frappe.cache().set_value(key, current + 1, expires_in_sec=60)
-    return True
+    try:
+        # Atomic under Redis: INCRBY, first writer opens the 60s window.
+        current = frappe.cache().incrby(key, 1)
+        if current == 1:
+            frappe.cache().expire(key, 60)
+        return current <= limit
+    except Exception:
+        # Cache backend without incrby — fall back to the old (non-atomic)
+        # check rather than blocking sends.
+        current = cint(frappe.cache().get_value(key) or 0)
+        if current >= limit:
+            return False
+        frappe.cache().set_value(key, current + 1, expires_in_sec=60)
+        return True
 
 
 def _breaker_cache_key(channel: str) -> str:

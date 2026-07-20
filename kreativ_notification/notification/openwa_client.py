@@ -81,10 +81,23 @@ class OpenWAClient:
         client = OpenWAClient()
         result = client.send_text(chat_id, text="Hello")
         result = client.send_document(chat_id, pdf_b64, "invoice.pdf")
+
     """
 
-    def __init__(self):
-        self.base_url, self.api_key, self.session_id = get_openwa_config()
+    def __init__(self, base_url: str | None = None, api_key: str | None = None,
+                 session_id: str | None = None):
+        """Explicit args win; anything blank falls back to OpenWA Settings.
+
+        Supports every historical call style:
+            OpenWAClient()                          # settings-driven (legacy)
+            OpenWAClient(base_url, api_key)         # api.py style
+            OpenWAClient(base_url, api_key, sid)    # per-channel (driver)
+        """
+        cfg_url, cfg_key, cfg_session = get_openwa_config()
+        url = base_url or cfg_url
+        self.base_url = url.rstrip("/") if url else ""
+        self.api_key = api_key or cfg_key
+        self.session_id = session_id or cfg_session or "default"
 
     def _ensure_configured(self) -> None:
         if not self.base_url:
@@ -226,6 +239,21 @@ class OpenWAClient:
             return {"status": "error", "message": "HTTP {0}".format(r.status_code)}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    def get_session_state(self) -> dict:
+        """GET /api/sessions/{id}/status -> {"status": ..., ...} (never throws)."""
+        self._ensure_configured()
+        url = "{0}/api/sessions/{1}/status".format(self.base_url, self.session_id)
+        try:
+            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            if r.status_code == 404:
+                return {"status": "not_found"}
+            if r.ok:
+                data = r.json() if r.content else {}
+                return data if isinstance(data, dict) else {"status": "unknown"}
+            return {"status": "error", "detail": "HTTP {0}".format(r.status_code)}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
 
     def get_session_qr(self) -> dict:
         self._ensure_configured()

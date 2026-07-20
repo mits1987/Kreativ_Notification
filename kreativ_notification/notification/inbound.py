@@ -19,6 +19,7 @@ from kreativ_notification.notification.openwa_client import (
     reset_circuit_breaker,
 )
 from kreativ_notification.notification.pdf_utils import generate_pdf_bytes
+from kreativ_notification.notification.send import send_document_via_whatsapp
 
 DEFAULT_INVOICE_KEYWORDS = "invoice,inv,बिल"
 DEFAULT_LEDGER_KEYWORDS = "ledger,statement,account,balance,बही"
@@ -437,13 +438,13 @@ def _verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bo
 
 
 def _send_text(chat_id: str, text: str) -> bool:
-    try:
-        client = OpenWAClient()
-        result = client.send_text(chat_id, text)
-        return result.get("success", False)
-    except Exception:
-        frappe.log_error(title="Failed to send text", message=frappe.get_traceback())
-        return False
+    from kreativ_notification.notification.send import send_text_via_whatsapp
+    return send_text_via_whatsapp(
+        text,
+        chat_id_override=chat_id,
+        source_doctype="System",
+        source_docname="inbound-bot",
+    ).get("success", False)
 
 
 def _check_rate_limit(sender_chat_id: str) -> bool:

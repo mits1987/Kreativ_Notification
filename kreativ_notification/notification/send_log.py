@@ -1,4 +1,4 @@
-"""WhatsApp Send Log helper — delegates to the DocType owned by gravures_custom."""
+"""WhatsApp Send Log helper — DocType owned by kreativ_notification."""
 import frappe
 from frappe.utils import now_datetime
 
@@ -28,9 +28,10 @@ def create_log(
             "status": "Queued",
             "sent_by": frappe.session.user,
             "sent_at": now_datetime(),
-            "meta": frappe.as_json(meta or {}),
         })
         log.insert(ignore_permissions=True)
+        # Use db_set to avoid conflict with Document.meta property
+        frappe.db.set_value("WhatsApp Send Log", log.name, "meta", frappe.as_json(meta or {}))
         frappe.db.commit()
         return log.name
     except Exception:

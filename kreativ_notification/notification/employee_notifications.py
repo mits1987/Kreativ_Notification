@@ -1,254 +1,185 @@
-"""Employee checkin and salary slip WhatsApp notifications."""
-import frappe
-import re
+"""Employee-facing WhatsApp notifications: checkin alerts + salary slips.
+
+v2 — CONSOLIDATED. Every send now flows through dispatcher.dispatch(),
+the single pipeline that owns:
+
+    - WhatsApp Send Log (outbox row created before any network call)
+    - retry with exponential backoff / terminal Permanently Failed
+    - per-channel rate limiting + quiet hours
+    - ONE circuit breaker shared by every producer in every app
+
+This module is therefore only responsible for:
+
+    1. building the message text / rendering the Salary Slip PDF
+    2. resolving the employee's WhatsApp number
+    3. handing off to dispatch() with a stable idempotency key
+
+Employee Checkin custom-field semantics (simplified from v1):
+    whatsapp_sent = 0 / None -> not yet handed to the dispatcher
+    whatsapp_sent = 1        -> handed to the dispatcher (delivery status
+                               now lives in WhatsApp Send Log, not here)
+    whatsapp_sent = 3        -> invalid / missing number — do not retry
+    whatsapp_sent = 2        -> RETIRED. "failed, retry transport" is the
+                               dispatcher's job now; nothing writes 2.
+"""
+
+from __future__ import annotations
+
 import base64
+from datetime import timedelta
+
+import frappe
 from frappe.utils import format_datetime, get_datetime
-from datetime import datetime, timedelta
-from kreativ_notification.notification.openwa_client import OpenWAClient, _breaker_key, _get_failure_streak
 
-MAX_RETRY_ATTEMPTS = 5
-ADMIN_CHAT_ID = "919106526195@c.us"
+from kreativ_notification.notification.dispatcher import dispatch
+
+ATTENDANCE_SHIFT_DOCTYPE = "KG Employee Attendance Shift"
 
 
-def _get_shift_hours_for_out(employee: str, checkin_time: datetime) -> str:
+# ---------------------------------------------------------------------------
+# Recipient resolution (single source of truth for employee numbers)
+# ---------------------------------------------------------------------------
+
+def _employee_recipient(employee: str, settings) -> str | None:
+    """Employee.cell_number -> 'CC..........@c.us' or None if unusable."""
+    mobile = frappe.db.get_value("Employee", employee, "cell_number") or ""
+    digits = "".join(filter(str.isdigit, mobile))
+    if len(digits) < 10:
+        return None
+    cc = "".join(filter(str.isdigit, settings.default_country_code or "91"))
+    if cc and len(digits) == 10:
+        digits = cc + digits
+    return digits + "@c.us"
+
+
+# ---------------------------------------------------------------------------
+# Checkin notifications
+# ---------------------------------------------------------------------------
+
+def _get_shift_hours_for_out(employee: str, out_time) -> str:
+    """Worked hours string for an OUT punch.
+
+    1. Prefer the paired KG Employee Attendance Shift row (if the async
+       recalculation has already run) — guarded, because that doctype
+       belongs to kreativ_attendance which may not be installed.
+    2. Fall back to the last IN punch before this OUT — simple and free
+       of job-ordering races.
+    """
     try:
-        checkin_date = checkin_time.date()
-        shift = frappe.db.get_value(
-            "Employee Shift",
-            {"employee": employee, "start_date": checkin_date},
-            "worked_hours",
-        )
-        if shift:
-            return shift
-
-        prev_date = checkin_date - timedelta(days=1)
-        shift = frappe.db.get_value(
-            "Employee Shift",
-            {"employee": employee, "start_date": prev_date},
-            "worked_hours",
-        )
-        if shift:
-            return shift
+        if frappe.db.exists("DocType", ATTENDANCE_SHIFT_DOCTYPE):
+            worked = frappe.db.get_value(
+                ATTENDANCE_SHIFT_DOCTYPE,
+                {"employee": employee, "check_out": out_time},
+                "worked_hours",
+            )
+            if worked:
+                return worked
 
         last_in = frappe.db.get_value(
             "Employee Checkin",
-            {"employee": employee, "log_type": "IN", "time": ["<", checkin_time]},
-            "time",
+            filters={
+                "employee": employee,
+                "log_type": "IN",
+                "time": ["<", out_time],
+            },
+            fieldname="time",
             order_by="time desc",
         )
         if last_in:
-            if isinstance(last_in, str):
-                last_in = get_datetime(last_in)
-            total_seconds = int((checkin_time - last_in).total_seconds())
-            if total_seconds > 0:
-                hours = int(total_seconds // 3600)
-                minutes = int((total_seconds % 3600) // 60)
-                return f"{hours}:{minutes:02d}"
-
-        return ""
+            secs = (get_datetime(out_time) - get_datetime(last_in)).total_seconds()
+            if 0 < secs < 24 * 3600:
+                return f"{int(secs // 3600)}:{int((secs % 3600) // 60):02d}"
     except Exception:
-        return ""
-
-
-def _mark_failed(checkin_name: str, retry_count: int):
-    if retry_count >= MAX_RETRY_ATTEMPTS:
-        frappe.db.set_value(
-            "Employee Checkin", checkin_name,
-            {"whatsapp_sent": 3, "whatsapp_retry_count": retry_count},
-            update_modified=False,
-        )
-        frappe.get_doc({
-            "doctype": "Comment",
-            "comment_type": "Info",
-            "reference_doctype": "Employee Checkin",
-            "reference_name": checkin_name,
-            "content": (
-                f"WhatsApp permanently failed after {retry_count} attempts. "
-                f"Possible causes: invalid phone number, employee not on WhatsApp, "
-                f"or OpenWA cannot reach this contact. Stopped retrying to save resources."
-            ),
-        }).insert(ignore_permissions=True)
-        frappe.db.commit()
-        return 3
-    else:
-        frappe.db.set_value(
-            "Employee Checkin", checkin_name,
-            {"whatsapp_sent": 2, "whatsapp_retry_count": retry_count},
-            update_modified=False,
-        )
-        frappe.db.commit()
-        return 2
+        frappe.log_error(title="Shift hours lookup failed",
+                         message=frappe.get_traceback())
+    return ""
 
 
 def notify_checkin(checkin_name: str, test_mode: bool = False):
-    """Background job: send one WhatsApp message for a new punch."""
+    """Background job: dispatch one WhatsApp message for a new punch."""
     settings = frappe.get_cached_doc("OpenWA Settings")
-    if not (settings.enabled and settings.base_url):
-        return
-
-    from kreativ_notification.notification.health import _can_attempt_probe
-    if not _can_attempt_probe():
+    if not settings.enabled:
         return
 
     c = frappe.db.get_value(
         "Employee Checkin", checkin_name,
-        ["employee", "employee_name", "log_type", "time",
-         "whatsapp_sent", "whatsapp_retry_count"],
+        ["employee", "employee_name", "log_type", "time", "whatsapp_sent"],
         as_dict=True,
     )
-    if not c:
+    if not c or c.whatsapp_sent in (1, 3):
+        return  # already handed off / permanently unroutable
+
+    # Direction filter. v1 returned WITHOUT marking, so the retry cron
+    # re-enqueued filtered punches every 10 min for 24h. Mark them handled.
+    notify_on = settings.notify_on or "IN and OUT"
+    if (notify_on == "IN only" and c.log_type != "IN") or \
+       (notify_on == "OUT only" and c.log_type != "OUT"):
+        frappe.db.set_value("Employee Checkin", checkin_name,
+                            "whatsapp_sent", 1, update_modified=False)
         return
 
-    if c.whatsapp_sent in (1, 3):
-        return
-
-    if settings.notify_on == "IN only" and c.log_type != "IN":
-        return
-    if settings.notify_on == "OUT only" and c.log_type != "OUT":
-        return
-
-    icon = "IN" if c.log_type == "IN" else "OUT"
     text = "{0} - {1} at {2}".format(
-        icon,
+        c.log_type,
         c.employee_name or c.employee,
         format_datetime(c.time, "dd-MM-yyyy HH:mm"),
     )
-
     if c.log_type == "OUT":
-        shift_hours = _get_shift_hours_for_out(c.employee, c.time)
-        if shift_hours:
-            text = "{0} shift hours: {1}".format(text, shift_hours)
+        hours = _get_shift_hours_for_out(c.employee, c.time)
+        if hours:
+            text = f"{text} shift hours: {hours}"
 
-    if test_mode or settings.test_mode:
-        _post(settings, "send-text", {"chatId": ADMIN_CHAT_ID, "text": text})
-        return
-
-    retry_count = (c.whatsapp_retry_count or 0) + 1
-
-    mobile = frappe.db.get_value("Employee", c.employee, "cell_number") or ""
-    digits = "".join(filter(str.isdigit, mobile))
-
-    if len(digits) >= 10:
-        cc = "".join(filter(str.isdigit, settings.default_country_code or ""))
-        if cc and not digits.startswith(cc) and len(digits) <= 10:
-            digits = cc + digits
-
-        chat_id = digits + "@c.us"
-
-        if _post(settings, "send-text", {"chatId": chat_id, "text": text}):
-            frappe.db.set_value(
-                "Employee Checkin", checkin_name,
-                {"whatsapp_sent": 1, "whatsapp_retry_count": retry_count},
-                update_modified=False,
-            )
-            frappe.db.commit()
-        else:
-            _mark_failed(checkin_name, retry_count)
+    # Test mode -> route to the admin chat instead of the employee.
+    if test_mode or getattr(settings, "test_mode", 0):
+        recipient = settings.chat_id
+        if not recipient:
+            return
     else:
-        if settings.chat_id:
-            if _post(settings, "send-text", {"chatId": settings.chat_id, "text": text}):
-                frappe.db.set_value(
-                    "Employee Checkin", checkin_name,
-                    {"whatsapp_sent": 1, "whatsapp_retry_count": retry_count},
-                    update_modified=False,
-                )
-                frappe.db.commit()
+        recipient = _employee_recipient(c.employee, settings)
+        if not recipient:
+            # No usable number: try admin fallback once, else stop forever.
+            if settings.chat_id:
+                recipient = settings.chat_id
             else:
-                _mark_failed(checkin_name, retry_count)
+                frappe.db.set_value("Employee Checkin", checkin_name,
+                                    "whatsapp_sent", 3, update_modified=False)
+                frappe.log_error(
+                    title=f"Checkin WhatsApp: invalid number for {c.employee}",
+                    message=f"Employee {c.employee} ({c.employee_name}) has no "
+                            "valid cell_number and no admin fallback chat is "
+                            "configured. Marked whatsapp_sent=3 (stop).",
+                )
+                return
 
-
-def send_salary_slip(salary_slip: str):
-    """Background job: render the Salary Slip PDF and WhatsApp it."""
-    settings = frappe.get_cached_doc("OpenWA Settings")
-    if not (settings.enabled and settings.send_salary_slips and settings.base_url):
-        return
-
-    slip = frappe.get_doc("Salary Slip", salary_slip)
-    mobile = frappe.db.get_value("Employee", slip.employee, "cell_number") or ""
-    digits = re.sub(r"\D", "", mobile)
-    if not digits:
-        frappe.log_error(
-            title="Salary slip WhatsApp skipped: no mobile number",
-            message=f"{slip.employee} ({slip.employee_name}) has no cell_number on the Employee record.",
-        )
-        return
-    cc = re.sub(r"\D", "", settings.default_country_code or "")
-    if cc and not digits.startswith(cc) and len(digits) <= 10:
-        digits = cc + digits
-
-    pdf = frappe.get_print(
-        "Salary Slip", slip.name,
-        print_format=settings.salary_slip_print_format or None,
-        as_pdf=True,
-    )
-    period = frappe.utils.format_date(slip.start_date, "MMMM yyyy")
-    filename = f"Salary Slip {period} - {slip.employee_name}.pdf"
-    caption = f"Salary Slip - {period}"
-
-    client = OpenWAClient()
-    client.send_document(
-        chat_id=f"{digits}@c.us",
-        base64_data=base64.b64encode(pdf).decode(),
-        filename=filename,
-        mimetype="application/pdf",
-        caption=caption,
+    result = dispatch(
+        recipient=recipient,
+        text=text,
+        message_type="Checkin",
+        source_doctype="Employee Checkin",
+        source_docname=checkin_name,
+        priority="Normal",
+        # One logical notification per punch, ever — even if this job runs
+        # twice (double enqueue, retry cron overlap), dispatch() dedupes.
+        idempotency_key=f"checkin:{checkin_name}",
     )
 
-
-def _post(settings, endpoint: str, payload: dict, raise_on_error: bool = False):
-    chat_id = payload.get("chatId", settings.chat_id)
-    text = payload.get("text", "")
-
-    client = OpenWAClient()
-    try:
-        if endpoint == "send-text":
-            result = client.send_text(chat_id, text)
-        elif endpoint == "send-document":
-            result = client.send_document(chat_id, payload.get("base64", ""),
-                                          payload.get("filename", "document"),
-                                          mimetype=payload.get("mimetype", "application/pdf"),
-                                          caption=payload.get("caption", ""))
-        else:
-            return False
-
-        if result.get("success"):
-            return True
-        frappe.log_error(title="OpenWA send failed", message=result.get("error", "Unknown error"))
-        if raise_on_error:
-            frappe.throw(result.get("error", "Could not send via OpenWA"))
-        return False
-    except Exception:
-        frappe.log_error(title="OpenWA WhatsApp send failed", message=frappe.get_traceback())
-        if raise_on_error:
-            frappe.throw("Could not send via OpenWA")
-        return False
+    if result.get("success"):
+        frappe.db.set_value("Employee Checkin", checkin_name,
+                            "whatsapp_sent", 1, update_modified=False)
+    # On dispatch() refusal (e.g. no channel configured) we deliberately
+    # leave whatsapp_sent at 0 so the retry cron tries again later.
 
 
 def retry_missed_notifications():
-    """Scheduled job: find Employee Checkins where whatsapp_sent was never set to 1 and retry."""
-    settings = frappe.get_single("OpenWA Settings")
-    if not (settings.enabled and settings.base_url):
-        return
+    """Cron safety net — re-enqueue punches that never REACHED the dispatcher.
 
-    if frappe.cache().get_value(_breaker_key("stale")):
-        frappe.log_error(
-            title="OpenWA Retry Skipped",
-            message="Session is stale (lastActive > 60 min).",
-        )
+    Transport failures are retried by the dispatcher itself (backoff,
+    Permanently Failed). This job only catches punches whose original
+    notify_checkin enqueue was lost (Redis blip, worker crash before the
+    dispatch() call). It is idempotent end-to-end because notify_checkin
+    skips whatsapp_sent=1 and dispatch() dedupes on checkin:{name}.
+    """
+    if not frappe.db.get_single_value("OpenWA Settings", "enabled"):
         return
-
-    perm_fail_cutoff = get_datetime() - timedelta(days=7)
-    if _get_failure_streak() < 3:
-        frappe.db.sql(
-            """
-            UPDATE `tabEmployee Checkin`
-            SET whatsapp_sent = 0
-            WHERE whatsapp_sent = 2
-              AND creation >= %s
-            """,
-            (perm_fail_cutoff,),
-        )
-        frappe.db.commit()
 
     cutoff = get_datetime() - timedelta(hours=24)
     unsent = frappe.get_all(
@@ -257,32 +188,85 @@ def retry_missed_notifications():
             "whatsapp_sent": ["in", [0, None]],
             "creation": [">=", cutoff],
         },
-        fields=["name", "employee_name", "log_type", "creation"],
+        pluck="name",
         order_by="creation asc",
         limit_page_length=50,
     )
-
-    if not unsent:
-        return
-
-    enqueued = 0
-    for c in unsent:
+    for name in unsent:
         try:
             frappe.enqueue(
                 "kreativ_notification.notification.employee_notifications.notify_checkin",
                 queue="short",
                 timeout=60,
-                checkin_name=c.name,
-                enqueue_after_commit=False,
+                checkin_name=name,
+                job_id=f"notif-checkin-retry-{name}",
+                deduplicate=True,
+                enqueue_after_commit=False,  # already inside a scheduled job
             )
-            enqueued += 1
         except Exception:
             frappe.log_error(
-                title=f"WhatsApp retry enqueue failed for {c.name}",
+                title=f"WhatsApp retry enqueue failed for {name}",
                 message=frappe.get_traceback(),
             )
 
-    if enqueued:
-        frappe.logger().info(
-            f"WhatsApp retry: enqueued {enqueued}/{len(unsent)} missed notifications"
+
+# ---------------------------------------------------------------------------
+# Salary slips
+# ---------------------------------------------------------------------------
+
+def send_salary_slip(salary_slip: str):
+    """Background job: render the Salary Slip PDF and dispatch it."""
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    if not (settings.enabled and getattr(settings, "send_salary_slips", 0)):
+        return
+
+    slip = frappe.db.get_value(
+        "Salary Slip", salary_slip,
+        ["employee", "employee_name", "start_date", "docstatus"],
+        as_dict=True,
+    )
+    if not slip or slip.docstatus != 1:
+        return
+
+    if getattr(settings, "test_mode", 0):
+        recipient = settings.chat_id
+    else:
+        recipient = _employee_recipient(slip.employee, settings)
+    if not recipient:
+        frappe.log_error(
+            title=f"Salary slip WhatsApp: no recipient for {slip.employee}",
+            message=f"{salary_slip}: employee has no valid cell_number "
+                    "(and test_mode admin chat not configured).",
         )
+        return
+
+    print_format = getattr(settings, "salary_slip_print_format", None) or None
+    try:
+        pdf_bytes = frappe.get_print(
+            "Salary Slip", salary_slip,
+            print_format=print_format, as_pdf=True,
+        )
+        file_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    except Exception:
+        frappe.log_error(
+            title=f"Salary slip PDF render failed: {salary_slip}",
+            message=frappe.get_traceback(),
+        )
+        return
+
+    period = format_datetime(slip.start_date, "MMMM yyyy") if slip.start_date else ""
+    dispatch(
+        recipient=recipient,
+        text=f"Salary Slip for {period}".strip(),
+        file_b64=file_b64,
+        filename=f"{salary_slip}.pdf",
+        mimetype="application/pdf",
+        message_type="Salary Slip",
+        source_doctype="Salary Slip",
+        source_docname=salary_slip,
+        source_print_format=print_format or "",
+        # Salary data is sensitive: one send per slip, ever. Cancelling and
+        # re-submitting creates a NEW slip name -> new key -> new send.
+        idempotency_key=f"salary-slip:{salary_slip}",
+        priority="Normal",
+    )

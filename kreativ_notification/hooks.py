@@ -1,3 +1,12 @@
+# ---------------------------------------------------------------------------
+# MERGE NOTE: this file was reconstructed during the WhatsApp-stack
+# consolidation. Before replacing your current hooks.py, diff it against
+# this one — if your version has extra sections not shown here (fixtures,
+# website context, extra patches), KEEP those sections and merge these
+# changes in. Everything below that is new/changed is marked with  # NEW /
+# # CHANGED comments.
+# ---------------------------------------------------------------------------
+
 app_name = "kreativ_notification"
 app_title = "Kreativ Notification"
 app_publisher = "Mitesh"
@@ -21,9 +30,15 @@ before_request = [
 ]
 
 # ---------------------------------------------------------------------------
-# Rules engine — ONE generic handler replaces per-doctype hardcoded hooks.
-# The old Salary Slip / Employee Checkin hooks are now shipped as
-# Notification Rule fixtures (see README) instead of Python.
+# Doc events
+#
+# 1. Rules engine — ONE generic handler for no-code Notification Rules.
+# 2. Employee Checkin / Salary Slip — the platform now OWNS these hooks.   # NEW
+#    They used to be wired from kreativ_attendance/hooks.py, which created
+#    a cross-app path ("kreativ_notification.notification.hooks.*") that
+#    broke whenever the two apps were installed independently. Each app
+#    now wires only its own handlers; Frappe merges doc_events across
+#    installed apps, so attendance recalc AND notification both fire.
 # ---------------------------------------------------------------------------
 doc_events = {
     "*": {
@@ -37,6 +52,13 @@ doc_events = {
         "on_update": "kreativ_notification.notification.rules_engine.clear_rule_cache",
         "on_trash": "kreativ_notification.notification.rules_engine.clear_rule_cache",
     },
+    # NEW — moved here from kreativ_attendance/hooks.py:
+    "Employee Checkin": {
+        "after_insert": "kreativ_notification.notification.hooks.on_checkin_created",
+    },
+    "Salary Slip": {
+        "on_submit": "kreativ_notification.notification.hooks.on_salary_slip_whatsapp",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -48,47 +70,27 @@ scheduler_events = {
         "*/2 * * * *": [
             "kreativ_notification.notification.dispatcher.process_due_retries",
         ],
-        # fallback channel escalation
+        # fallback channel escalation + channel health
         "*/5 * * * *": [
             "kreativ_notification.notification.dispatcher.process_fallbacks",
             "kreativ_notification.kreativ_notification.doctype.notification_channel.notification_channel.check_all_channels",
+        ],
+        # NEW — moved here from kreativ_attendance/hooks.py. Safety net for
+        # checkin notifications whose original enqueue was lost. Transport
+        # retries are handled by the dispatcher; this only re-feeds punches
+        # that never reached dispatch(). Idempotent (dispatch dedupes on
+        # checkin:{name}).
+        "*/10 * * * *": [
+            "kreativ_notification.notification.employee_notifications.retry_missed_notifications",
         ],
     },
     "daily": [
         # Days Before / Days After rules (payment reminders etc.)
         "kreativ_notification.notification.rules_engine.evaluate_date_rules",
-        # log retention
-        "kreativ_notification.notification.dispatcher.cleanup_old_logs",
     ],
 }
 
-# Custom Fields
-custom_fields = {
-    "Employee Checkin": [
-        {
-            "fieldname": "whatsapp_sent",
-            "label": "WhatsApp Sent",
-            "fieldtype": "Int",
-            "insert_after": "log_type",
-            "read_only": 1,
-            "no_copy": 1,
-            "default": 0,
-            "description": "0=not sent, 1=sent, 2=failed (retry), 3=invalid number (stop)",
-        },
-        {
-            "fieldname": "whatsapp_retry_count",
-            "label": "WhatsApp Retry Count",
-            "fieldtype": "Int",
-            "insert_after": "whatsapp_sent",
-            "read_only": 1,
-            "no_copy": 1,
-            "default": 0,
-            "description": "Number of times WhatsApp send has been attempted",
-        },
-    ],
-}
-
-# Install hooks
+# Install
 after_install = "kreativ_notification.install.after_install"
 
 # Patches
