@@ -11,14 +11,6 @@
   ],
   "fields": [
     {
-      "fieldname": "parent",
-      "fieldtype": "Link",
-      "label": "Parent",
-      "options": "Notification Rule",
-      "hidden": 1,
-      "reqd": 1
-    },
-    {
       "fieldname": "recipient_type",
       "fieldtype": "Select",
       "in_list_view": 1,
