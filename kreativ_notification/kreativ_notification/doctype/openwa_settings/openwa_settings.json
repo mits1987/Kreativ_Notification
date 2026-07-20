@@ -1,202 +1,223 @@
 {
   "actions": [],
-  "allow_bulk_edit": 1,
-  "allow_copy": 1,
-  "allow_events_in_timeline": 1,
-  "allow_import": 1,
-  "allow_rename": 1,
-  "autoname": "format:OWS-{####}",
-  "creation": "2026-07-19 00:00:00.000000",
+  "creation": "2026-07-16 23:30:00",
   "doctype": "DocType",
   "engine": "InnoDB",
   "field_order": [
     "enabled",
     "base_url",
     "api_key",
+    "column_break_1",
     "session_id",
     "chat_id",
-    "test_mode",
-    "send_salary_slips",
-    "salary_slip_print_format",
     "default_country_code",
-    "notify_on",
     "section_break_webhook",
     "webhook_enabled",
     "webhook_secret",
+    "column_break_webhook_2",
     "auto_reply_enabled",
-    "inbound_webhook_url",
-    "section_break_bot",
+    "allowed_roles",
     "invoice_keywords",
-    "ledger_keywords",
-    "allowed_roles"
+    "section_break_session",
+    "session_status",
+    "session_qr",
+    "session_phone",
+    "session_pushname",
+    "notify_on",
+    "salary_section",
+    "send_salary_slips",
+    "salary_slip_print_format",
+    "test_section",
+    "test_mode",
+    "test_chat_id"
   ],
   "fields": [
     {
+      "default": "0",
       "fieldname": "enabled",
       "fieldtype": "Check",
-      "label": "Enabled",
-      "default": 0
+      "label": "Enabled"
     },
     {
+      "description": "e.g. http://localhost:2785 (where the OpenWA Docker container runs)",
       "fieldname": "base_url",
       "fieldtype": "Data",
-      "label": "OpenWA Base URL",
-      "default": "http://localhost:2785",
-      "description": "OpenWA gateway base URL (e.g., http://localhost:2785)"
+      "label": "OpenWA Base URL"
     },
     {
+      "description": "X-API-Key created in the OpenWA dashboard",
       "fieldname": "api_key",
       "fieldtype": "Password",
-      "label": "API Key",
-      "description": "OpenWA API key for authentication"
+      "label": "API Key"
     },
     {
+      "fieldname": "column_break_1",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "default",
+      "description": "The OpenWA session (WhatsApp account) to send from",
       "fieldname": "session_id",
       "fieldtype": "Data",
-      "label": "Session ID",
-      "default": "default",
-      "description": "WhatsApp session ID on OpenWA"
+      "label": "Session ID"
     },
     {
+      "description": "Number: 9876543210@c.us \u2014 or a group: 1203630XXXXXXX@g.us (get group IDs from the OpenWA dashboard)",
       "fieldname": "chat_id",
       "fieldtype": "Data",
-      "label": "Default Chat ID",
-      "default": "919106526195@c.us",
-      "description": "Default recipient for admin/test messages"
+      "label": "Default Recipient Chat ID"
     },
     {
-      "fieldname": "test_mode",
-      "fieldtype": "Check",
-      "label": "Test Mode",
-      "default": 0
-    },
-    {
-      "fieldname": "send_salary_slips",
-      "fieldtype": "Check",
-      "label": "Send Salary Slips",
-      "default": 1
-    },
-    {
-      "fieldname": "salary_slip_print_format",
-      "fieldtype": "Link",
-      "label": "Salary Slip Print Format",
-      "options": "Print Format",
-      "default": "Standard"
-    },
-    {
+      "default": "91",
+      "description": "Digits only, e.g. 91. Prefixed to employee mobile numbers that don't already include a country code.",
       "fieldname": "default_country_code",
       "fieldtype": "Data",
-      "label": "Default Country Code",
-      "default": "91",
-      "description": "Prepended to 10-digit mobile numbers (e.g., 91 for India)"
-    },
-    {
-      "fieldname": "notify_on",
-      "fieldtype": "Select",
-      "label": "Notify On",
-      "options": "Both\nIN only\nOUT only",
-      "default": "Both"
+      "label": "Default Country Code"
     },
     {
       "fieldname": "section_break_webhook",
       "fieldtype": "Section Break",
-      "label": "Inbound Webhook"
+      "label": "Inbound Webhook Settings"
     },
     {
+      "default": "0",
+      "description": "Enable processing of incoming WhatsApp messages via OpenWA webhook",
       "fieldname": "webhook_enabled",
       "fieldtype": "Check",
-      "label": "Webhook Enabled",
-      "default": 0
+      "label": "Webhook Enabled"
     },
     {
+      "description": "Secret key for verifying OpenWA webhook HMAC signatures. Set the same value in OpenWA webhook configuration.",
       "fieldname": "webhook_secret",
       "fieldtype": "Password",
-      "label": "Webhook Secret (HMAC)",
-      "description": "HMAC SHA256 secret for signature validation"
+      "label": "Webhook Secret"
     },
     {
+      "fieldname": "column_break_webhook_2",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "0",
+      "description": "Automatically reply to invoice requests from authorised employees",
       "fieldname": "auto_reply_enabled",
       "fieldtype": "Check",
-      "label": "Auto Reply Enabled",
-      "default": 1
+      "label": "Auto-Reply Enabled"
     },
     {
-      "fieldname": "inbound_webhook_url",
-      "fieldtype": "Data",
-      "label": "Inbound Webhook URL",
-      "description": "Public URL for OpenWA to POST to",
-      "default": ""
+      "description": "Comma-separated list of roles allowed to use the auto-reply bot. Leave empty to allow all active employees. Example: Sales Manager,Sales User,Marketing User",
+      "fieldname": "allowed_roles",
+      "fieldtype": "Small Text",
+      "label": "Allowed Roles"
     },
     {
-      "fieldname": "section_break_bot",
-      "fieldtype": "Section Break",
-      "label": "Bot Keywords"
-    },
-    {
+      "default": "invoice,inv,\u092c\u093f\u0932",
+      "description": "Comma-separated keywords that trigger invoice PDF fetch (case-insensitive).",
       "fieldname": "invoice_keywords",
       "fieldtype": "Data",
-      "label": "Invoice Keywords",
-      "default": "invoice,inv,बिल",
-      "description": "Comma-separated keywords to trigger invoice bot"
+      "label": "Invoice Keywords"
     },
     {
-      "fieldname": "ledger_keywords",
+      "fieldname": "section_break_session",
+      "fieldtype": "Section Break",
+      "label": "Session Status & QR Code"
+    },
+    {
+      "default": "unknown",
+      "description": "Current connection status of the WhatsApp session",
+      "fieldname": "session_status",
+      "fieldtype": "Select",
+      "label": "Session Status",
+      "options": "ready\nconnected\nqr_ready\ndisconnected\ncreated\nunknown\nerror",
+      "read_only": 1
+    },
+    {
+      "fieldname": "session_qr",
+      "fieldtype": "HTML",
+      "label": "QR Code (scan with WhatsApp on phone)",
+      "options": "<div style='padding:20px;text-align:center;color:#888;'><p style='font-size:14px;'>\u00a0Configure settings on the left, then click <b>Refresh Status & QR</b> at the top.</p><p style='font-size:12px;'>The QR code will appear here automatically when the session is ready to pair.</p></div>",
+      "read_only": 1
+    },
+    {
+      "fieldname": "session_phone",
       "fieldtype": "Data",
-      "label": "Ledger Keywords",
-      "default": "ledger,statement,account,balance,बही",
-      "description": "Comma-separated keywords to trigger ledger bot"
+      "label": "Linked Phone",
+      "read_only": 1
     },
     {
-      "fieldname": "allowed_roles",
-      "fieldtype": "Table MultiSelect",
-      "label": "Allowed Roles",
-      "options": "Role",
-      "description": "Roles allowed to use inbound bot"
+      "fieldname": "session_pushname",
+      "fieldtype": "Data",
+      "label": "WhatsApp Name",
+      "read_only": 1
+    },
+    {
+      "default": "IN and OUT",
+      "fieldname": "notify_on",
+      "fieldtype": "Select",
+      "label": "Notify On",
+      "options": "IN and OUT\nIN only\nOUT only"
+    },
+    {
+      "fieldname": "salary_section",
+      "fieldtype": "Section Break",
+      "label": "Salary Slip Delivery"
+    },
+    {
+      "default": "0",
+      "description": "Sends to the employee's Mobile (cell_number on the Employee record). Verify numbers first \u2014 salary data is sensitive.",
+      "fieldname": "send_salary_slips",
+      "fieldtype": "Check",
+      "label": "Send Salary Slip PDF to employee on submit"
+    },
+    {
+      "description": "Leave blank for the default format",
+      "fieldname": "salary_slip_print_format",
+      "fieldtype": "Link",
+      "label": "Salary Slip Print Format",
+      "options": "Print Format"
+    },
+    {
+      "fieldname": "test_section",
+      "fieldtype": "Section Break",
+      "label": "Testing"
+    },
+    {
+      "default": "0",
+      "description": "When enabled, all WhatsApp notifications go to the Test Chat ID below instead of employee phones. Use for testing without disturbing employees.",
+      "fieldname": "test_mode",
+      "fieldtype": "Check",
+      "label": "Test Mode"
+    },
+    {
+      "depends_on": "eval:doc.test_mode",
+      "description": "Chat ID to receive test notifications (e.g., 919106526195@c.us for Mitesh). Only used when Test Mode is enabled.",
+      "fieldname": "test_chat_id",
+      "fieldtype": "Data",
+      "label": "Test Chat ID"
     }
   ],
   "issingle": 1,
-  "modified": "2026-07-19 00:00:00.000000",
+  "links": [],
+  "modified": "2026-07-19 16:27:18.317576",
   "modified_by": "Administrator",
-  "module": "Kreativ Notification",
+  "module": "Gravures Custom",
   "name": "OpenWA Settings",
   "owner": "Administrator",
   "permissions": [
     {
       "create": 1,
-      "delete": 1,
-      "email": 1,
-      "export": 1,
-      "print": 1,
       "read": 1,
       "role": "System Manager",
-      "share": 1,
       "write": 1
     },
     {
-      "create": 0,
-      "delete": 0,
-      "email": 1,
-      "export": 1,
-      "print": 1,
+      "create": 1,
       "read": 1,
-      "role": "WhatsApp Manager",
-      "share": 0,
+      "role": "HR Manager",
       "write": 1
-    },
-    {
-      "create": 0,
-      "delete": 0,
-      "email": 1,
-      "export": 1,
-      "print": 1,
-      "read": 1,
-      "role": "WhatsApp User",
-      "share": 0,
-      "write": 0
     }
   ],
-  "quick_entry": 0,
-  "sort_field": "modified",
+  "row_format": "Dynamic",
+  "sort_field": "creation",
   "sort_order": "DESC",
-  "track_changes": 1
+  "states": []
 }

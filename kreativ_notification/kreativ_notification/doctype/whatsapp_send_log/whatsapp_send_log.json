@@ -17,8 +17,21 @@
     "message_type",
     "source_print_format",
     "status",
-    "error_message",
+    "channel",
+    "priority",
+    "column_break_platform",
+    "idempotency_key",
+    "provider_message_id",
+    "notification_rule",
+    "section_retry",
     "retry_count",
+    "retry_after",
+    "column_break_fallback",
+    "fallback_channel",
+    "fallback_deadline",
+    "fallback_fired",
+    "section_error",
+    "error_message",
     "meta"
   ],
   "fields": [
@@ -27,19 +40,22 @@
       "fieldtype": "Link",
       "label": "Source DocType",
       "options": "DocType",
-      "reqd": 1
+      "reqd": 1,
+      "in_standard_filter": 1
     },
     {
       "fieldname": "source_docname",
       "fieldtype": "Data",
       "label": "Source DocName",
-      "reqd": 1
+      "reqd": 1,
+      "in_standard_filter": 1
     },
     {
       "fieldname": "recipient",
       "fieldtype": "Data",
       "label": "Recipient",
-      "reqd": 1
+      "reqd": 1,
+      "in_list_view": 1
     },
     {
       "fieldname": "recipient_display",
@@ -50,8 +66,9 @@
       "fieldname": "message_type",
       "fieldtype": "Select",
       "label": "Message Type",
-      "options": "Print PDF\nDispatch PDF\nScreenshot\nCustom\nTest",
-      "default": "Print PDF"
+      "options": "Print PDF\nDispatch PDF\nScreenshot\nCustom\nTest\nRule",
+      "default": "Custom",
+      "in_list_view": 1
     },
     {
       "fieldname": "source_print_format",
@@ -62,19 +79,109 @@
       "fieldname": "status",
       "fieldtype": "Select",
       "label": "Status",
-      "options": "Queued\nProcessing\nSent\nFailed",
-      "default": "Queued"
+      "options": "Queued\nProcessing\nSent\nDelivered\nRead\nFailed\nPermanently Failed",
+      "default": "Queued",
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "channel",
+      "fieldtype": "Link",
+      "label": "Channel",
+      "options": "Notification Channel",
+      "read_only": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "default": "Normal",
+      "fieldname": "priority",
+      "fieldtype": "Select",
+      "label": "Priority",
+      "options": "Urgent\nNormal\nBulk",
+      "read_only": 1
+    },
+    {
+      "fieldname": "column_break_platform",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "idempotency_key",
+      "fieldtype": "Data",
+      "label": "Idempotency Key",
+      "length": 255,
+      "no_copy": 1,
+      "read_only": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "provider_message_id",
+      "fieldtype": "Data",
+      "label": "Provider Message ID",
+      "no_copy": 1,
+      "read_only": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "notification_rule",
+      "fieldtype": "Link",
+      "label": "Notification Rule",
+      "options": "Notification Rule",
+      "read_only": 1
+    },
+    {
+      "collapsible": 1,
+      "fieldname": "section_retry",
+      "fieldtype": "Section Break",
+      "label": "Retry & Fallback"
+    },
+    {
+      "default": "0",
+      "fieldname": "retry_count",
+      "fieldtype": "Int",
+      "label": "Retry Count",
+      "read_only": 1
+    },
+    {
+      "fieldname": "retry_after",
+      "fieldtype": "Datetime",
+      "label": "Retry After",
+      "no_copy": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "column_break_fallback",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "fallback_channel",
+      "fieldtype": "Link",
+      "label": "Fallback Channel",
+      "options": "Notification Channel",
+      "read_only": 1
+    },
+    {
+      "fieldname": "fallback_deadline",
+      "fieldtype": "Datetime",
+      "label": "Fallback Deadline",
+      "read_only": 1
+    },
+    {
+      "default": "0",
+      "fieldname": "fallback_fired",
+      "fieldtype": "Check",
+      "label": "Fallback Fired",
+      "read_only": 1
+    },
+    {
+      "collapsible": 1,
+      "fieldname": "section_error",
+      "fieldtype": "Section Break",
+      "label": "Error & Meta"
     },
     {
       "fieldname": "error_message",
       "fieldtype": "Long Text",
       "label": "Error Message"
-    },
-    {
-      "fieldname": "retry_count",
-      "fieldtype": "Int",
-      "label": "Retry Count",
-      "default": 0
     },
     {
       "fieldname": "meta",
@@ -84,7 +191,8 @@
   ],
   "issingle": 0,
   "istable": 0,
-  "modified": "2026-07-19 00:00:00.000000",
+  "links": [],
+  "modified": "2026-07-20 00:00:00.000000",
   "modified_by": "Administrator",
   "module": "Kreativ Notification",
   "name": "WhatsApp Send Log",
@@ -97,31 +205,26 @@
       "export": 1,
       "print": 1,
       "read": 1,
+      "report": 1,
       "role": "System Manager",
       "share": 1,
       "write": 1
     },
     {
-      "create": 0,
-      "delete": 0,
       "email": 1,
       "export": 1,
       "print": 1,
       "read": 1,
+      "report": 1,
       "role": "WhatsApp Manager",
-      "share": 0,
       "write": 1
     },
     {
-      "create": 0,
-      "delete": 0,
       "email": 1,
       "export": 1,
       "print": 1,
       "read": 1,
-      "role": "WhatsApp User",
-      "share": 0,
-      "write": 0
+      "role": "WhatsApp User"
     }
   ],
   "quick_entry": 0,

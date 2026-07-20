@@ -1,0 +1,56 @@
+{
+  "actions": [],
+  "creation": "2026-07-20 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "recipient_type",
+    "value",
+    "contact_fieldname"
+  ],
+  "fields": [
+    {
+      "fieldname": "parent",
+      "fieldtype": "Link",
+      "label": "Parent",
+      "options": "Notification Rule",
+      "hidden": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "recipient_type",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "label": "Type",
+      "options": "Document Field\nLinked Contact\nRole\nStatic",
+      "reqd": 1
+    },
+    {
+      "description": "Document Field: fieldname holding a mobile/email (e.g. contact_mobile). Linked Contact: link fieldname (e.g. customer, employee). Role: role name. Static: the number/email itself.",
+      "fieldname": "value",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "Value",
+      "reqd": 1
+    },
+    {
+      "default": "mobile_no",
+      "description": "For Linked Contact: which field on the linked party's contact to use (mobile_no, cell_number, email_id)",
+      "fieldname": "contact_fieldname",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "label": "Contact Field"
+    }
+  ],
+  "istable": 1,
+  "links": [],
+  "modified": "2026-07-20 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Kreativ Notification",
+  "name": "Notification Rule Recipient",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC"
+}

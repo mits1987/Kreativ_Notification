@@ -15,10 +15,9 @@ def execute():
     ]
 
     for idx_name, columns in indexes:
-        if not frappe.db.has_index("WhatsApp Send Log", idx_name):
-            try:
-                frappe.db.sql(f"ALTER TABLE `tabWhatsApp Send Log` ADD INDEX `{idx_name}` ({columns})")
-            except Exception:
-                pass
+        try:
+            frappe.db.sql(f"ALTER TABLE `tabWhatsApp Send Log` ADD INDEX `{idx_name}` ({columns})")
+        except Exception:
+            pass
 
     frappe.db.commit()

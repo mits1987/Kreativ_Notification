@@ -1,0 +1,145 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:template_name",
+ "creation": "2026-07-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "enabled",
+  "column_break_head",
+  "for_doctype",
+  "section_body",
+  "default_language",
+  "variants",
+  "section_attachment",
+  "attach_print",
+  "print_format",
+  "column_break_attach",
+  "attachment_filename",
+  "section_meta",
+  "meta_template_name",
+  "meta_template_language",
+  "section_help"
+ ],
+ "fields": [
+  {
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "label": "Template Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The doctype this template renders against (used for preview and validation)",
+   "fieldname": "for_doctype",
+   "fieldtype": "Link",
+   "label": "For DocType",
+   "options": "DocType",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_body",
+   "fieldtype": "Section Break",
+   "label": "Body"
+  },
+  {
+   "default": "en",
+   "description": "Fallback when the recipient's language has no variant",
+   "fieldname": "default_language",
+   "fieldtype": "Data",
+   "label": "Default Language"
+  },
+  {
+   "fieldname": "variants",
+   "fieldtype": "Table",
+   "label": "Language Variants",
+   "options": "Message Template Variant",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_attachment",
+   "fieldtype": "Section Break",
+   "label": "Attachment"
+  },
+  {
+   "default": "0",
+   "description": "Attach the source document as a PDF",
+   "fieldname": "attach_print",
+   "fieldtype": "Check",
+   "label": "Attach Print PDF"
+  },
+  {
+   "depends_on": "attach_print",
+   "fieldname": "print_format",
+   "fieldtype": "Link",
+   "label": "Print Format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "column_break_attach",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "attach_print",
+   "description": "Jinja allowed, e.g. {{ doc.name }}.pdf",
+   "fieldname": "attachment_filename",
+   "fieldtype": "Data",
+   "label": "Attachment Filename"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_meta",
+   "fieldtype": "Section Break",
+   "label": "Meta Cloud API (official WhatsApp)"
+  },
+  {
+   "description": "Name of the APPROVED template on Meta. When set and the channel is Meta Cloud API, this is sent as a template message (required outside the 24h window).",
+   "fieldname": "meta_template_name",
+   "fieldtype": "Data",
+   "label": "Meta Template Name"
+  },
+  {
+   "default": "en",
+   "fieldname": "meta_template_language",
+   "fieldtype": "Data",
+   "label": "Meta Template Language Code"
+  },
+  {
+   "description": "Body is Jinja: {{ doc.field }}, {{ frappe.utils... }}. Recipient language is matched against variants; falls back to Default Language.",
+   "fieldname": "section_help",
+   "fieldtype": "Section Break",
+   "label": ""
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kreativ Notification",
+ "name": "Message Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1,
+   "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1
+  },
+  {
+   "create": 1, "read": 1, "report": 1, "role": "WhatsApp Manager", "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

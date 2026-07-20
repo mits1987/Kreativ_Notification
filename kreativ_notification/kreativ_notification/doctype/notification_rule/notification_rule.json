@@ -1,0 +1,190 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:rule_name",
+ "creation": "2026-07-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_name",
+  "enabled",
+  "column_break_head",
+  "document_type",
+  "priority",
+  "section_trigger",
+  "event",
+  "value_changed_field",
+  "column_break_trigger",
+  "date_field",
+  "days_offset",
+  "section_condition",
+  "condition",
+  "section_message",
+  "message_template",
+  "column_break_msg",
+  "channel",
+  "fallback_channel",
+  "fallback_after_minutes",
+  "section_recipients",
+  "recipients"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "label": "Rule Name",
+   "reqd": 0,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "document_type",
+   "fieldtype": "Link",
+   "label": "Document Type",
+   "options": "DocType",
+   "reqd": 0,
+   "in_standard_filter": 1,
+   "in_list_view": 1
+  },
+  {
+   "default": "Normal",
+   "description": "Urgent bypasses quiet hours and jumps the queue. Bulk yields to everything.",
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "label": "Priority",
+   "options": "Urgent\nNormal\nBulk"
+  },
+  {
+   "fieldname": "section_trigger",
+   "fieldtype": "Section Break",
+   "label": "Trigger"
+  },
+  {
+   "fieldname": "event",
+   "fieldtype": "Select",
+   "label": "Event",
+   "options": "New\nSubmit\nCancel\nValue Change\nDays Before\nDays After",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "depends_on": "eval:doc.event=='Value Change'",
+   "description": "Fieldname to watch",
+   "fieldname": "value_changed_field",
+   "fieldtype": "Data",
+   "label": "Value Changed Field",
+   "mandatory_depends_on": "eval:doc.event=='Value Change'"
+  },
+  {
+   "fieldname": "column_break_trigger",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:['Days Before','Days After'].includes(doc.event)",
+   "description": "Date/Datetime fieldname on the document (e.g. due_date)",
+   "fieldname": "date_field",
+   "fieldtype": "Data",
+   "label": "Date Field",
+   "mandatory_depends_on": "eval:['Days Before','Days After'].includes(doc.event)"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:['Days Before','Days After'].includes(doc.event)",
+   "fieldname": "days_offset",
+   "fieldtype": "Int",
+   "label": "Days",
+   "non_negative": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_condition",
+   "fieldtype": "Section Break",
+   "label": "Condition"
+  },
+  {
+   "description": "Optional Python expression, doc available. e.g. doc.grand_total > 10000 and doc.status != 'Paid'",
+   "fieldname": "condition",
+   "fieldtype": "Code",
+   "label": "Condition",
+   "options": "Python"
+  },
+  {
+   "fieldname": "section_message",
+   "fieldtype": "Section Break",
+   "label": "Message"
+  },
+  {
+   "fieldname": "message_template",
+   "fieldtype": "Link",
+   "label": "Message Template",
+   "options": "Message Template",
+   "reqd": 0
+  },
+  {
+   "fieldname": "column_break_msg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Blank = site default channel",
+   "fieldname": "channel",
+   "fieldtype": "Link",
+   "label": "Channel",
+   "options": "Notification Channel"
+  },
+  {
+   "description": "If the primary send is still not Sent/Delivered after the wait, resend via this channel",
+   "fieldname": "fallback_channel",
+   "fieldtype": "Link",
+   "label": "Fallback Channel",
+   "options": "Notification Channel"
+  },
+  {
+   "default": "30",
+   "depends_on": "fallback_channel",
+   "fieldname": "fallback_after_minutes",
+   "fieldtype": "Int",
+   "label": "Fallback After (Minutes)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "section_recipients",
+   "fieldtype": "Section Break",
+   "label": "Recipients"
+  },
+  {
+   "fieldname": "recipients",
+   "fieldtype": "Table",
+   "label": "Recipients",
+   "options": "Notification Rule Recipient",
+   "reqd": 0
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kreativ Notification",
+ "name": "Notification Rule",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1,
+   "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1
+  },
+  {
+   "read": 1, "report": 1, "role": "WhatsApp Manager", "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

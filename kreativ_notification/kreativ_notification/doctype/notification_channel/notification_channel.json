@@ -1,0 +1,200 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:channel_name",
+ "creation": "2026-07-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "channel_name",
+  "channel_type",
+  "enabled",
+  "is_default",
+  "priority",
+  "column_break_main",
+  "default_country_code",
+  "rate_limit_per_minute",
+  "quiet_hours_start",
+  "quiet_hours_end",
+  "section_credentials",
+  "base_url",
+  "api_key",
+  "session_id",
+  "column_break_creds",
+  "phone_number_id",
+  "business_account_id",
+  "access_token",
+  "webhook_secret",
+  "section_health",
+  "health_status",
+  "last_health_check",
+  "health_detail"
+ ],
+ "fields": [
+  {
+   "fieldname": "channel_name",
+   "fieldtype": "Data",
+   "label": "Channel Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "channel_type",
+   "fieldtype": "Select",
+   "label": "Channel Type",
+   "options": "WhatsApp - OpenWA\nWhatsApp - Meta Cloud API\nEmail",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "in_list_view": 1
+  },
+  {
+   "default": "0",
+   "description": "Used when a rule doesn't name a channel explicitly. Only one default per site.",
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "label": "Is Default"
+  },
+  {
+   "default": "10",
+   "description": "Lower = preferred when multiple channels of a type are enabled",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority"
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "91",
+   "description": "Digits only. Prefixed to 10-digit local mobile numbers.",
+   "fieldname": "default_country_code",
+   "fieldtype": "Data",
+   "label": "Default Country Code"
+  },
+  {
+   "default": "20",
+   "description": "Max sends per minute through this channel (0 = unlimited)",
+   "fieldname": "rate_limit_per_minute",
+   "fieldtype": "Int",
+   "label": "Rate Limit / Minute"
+  },
+  {
+   "description": "No non-urgent sends between these times. Leave both blank to disable.",
+   "fieldname": "quiet_hours_start",
+   "fieldtype": "Time",
+   "label": "Quiet Hours Start"
+  },
+  {
+   "fieldname": "quiet_hours_end",
+   "fieldtype": "Time",
+   "label": "Quiet Hours End"
+  },
+  {
+   "fieldname": "section_credentials",
+   "fieldtype": "Section Break",
+   "label": "Provider Credentials"
+  },
+  {
+   "depends_on": "eval:doc.channel_type=='WhatsApp - OpenWA'",
+   "description": "e.g. http://localhost:2785",
+   "fieldname": "base_url",
+   "fieldtype": "Data",
+   "label": "OpenWA Base URL"
+  },
+  {
+   "depends_on": "eval:doc.channel_type=='WhatsApp - OpenWA'",
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Key"
+  },
+  {
+   "default": "default",
+   "depends_on": "eval:doc.channel_type=='WhatsApp - OpenWA'",
+   "fieldname": "session_id",
+   "fieldtype": "Data",
+   "label": "Session ID"
+  },
+  {
+   "fieldname": "column_break_creds",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.channel_type=='WhatsApp - Meta Cloud API'",
+   "fieldname": "phone_number_id",
+   "fieldtype": "Data",
+   "label": "Phone Number ID"
+  },
+  {
+   "depends_on": "eval:doc.channel_type=='WhatsApp - Meta Cloud API'",
+   "description": "WABA ID — needed only for template sync",
+   "fieldname": "business_account_id",
+   "fieldtype": "Data",
+   "label": "Business Account ID"
+  },
+  {
+   "depends_on": "eval:doc.channel_type=='WhatsApp - Meta Cloud API'",
+   "description": "Permanent System User token recommended",
+   "fieldname": "access_token",
+   "fieldtype": "Password",
+   "label": "Access Token"
+  },
+  {
+   "description": "Used to verify inbound webhook signatures (Meta App Secret / OpenWA secret)",
+   "fieldname": "webhook_secret",
+   "fieldtype": "Password",
+   "label": "Webhook Secret"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_health",
+   "fieldtype": "Section Break",
+   "label": "Health"
+  },
+  {
+   "default": "unknown",
+   "fieldname": "health_status",
+   "fieldtype": "Select",
+   "label": "Health Status",
+   "options": "unknown\nconnected\nready\nqr_ready\ndisconnected\nauth_error\nunconfigured\nerror",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "last_health_check",
+   "fieldtype": "Datetime",
+   "label": "Last Health Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "health_detail",
+   "fieldtype": "Small Text",
+   "label": "Health Detail",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Kreativ Notification",
+ "name": "Notification Channel",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1,
+   "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1
+  },
+  {
+   "read": 1, "report": 1, "role": "WhatsApp Manager", "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

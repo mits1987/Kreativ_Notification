@@ -1,7 +1,7 @@
 app_name = "kreativ_notification"
 app_title = "Kreativ Notification"
 app_publisher = "Mitesh"
-app_description = "Unified WhatsApp/notification infrastructure for Kreativ Gravures"
+app_description = "Multi-channel notification platform for ERPNext (WhatsApp, Email, extensible)"
 app_email = "info@kreativ.com"
 app_license = "MIT"
 
@@ -10,38 +10,56 @@ app_license = "MIT"
 # See feedback-cloudflare-cache-rocks in MEMORY.md.
 app_include_js = [
     "/assets/kreativ_notification/js/kreativ_notification.js",
-    "/assets/kreativ_notification/js/print_whatsapp.js",
     "/assets/kreativ_notification/js/print_whatsapp_v4.js",
 ]
 
-# Scheduled Tasks
+# ---------------------------------------------------------------------------
+# Rules engine — ONE generic handler replaces per-doctype hardcoded hooks.
+# The old Salary Slip / Employee Checkin hooks are now shipped as
+# Notification Rule fixtures (see README) instead of Python.
+# ---------------------------------------------------------------------------
+doc_events = {
+    "*": {
+        "after_insert": "kreativ_notification.notification.rules_engine.handle_doc_event",
+        "on_submit": "kreativ_notification.notification.rules_engine.handle_doc_event",
+        "on_cancel": "kreativ_notification.notification.rules_engine.handle_doc_event",
+        "on_update": "kreativ_notification.notification.rules_engine.handle_doc_event",
+        "on_update_after_submit": "kreativ_notification.notification.rules_engine.handle_doc_event",
+    },
+    "Notification Rule": {
+        "on_update": "kreativ_notification.notification.rules_engine.clear_rule_cache",
+        "on_trash": "kreativ_notification.notification.rules_engine.clear_rule_cache",
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Scheduler
+# ---------------------------------------------------------------------------
 scheduler_events = {
-    "all": [
-        "kreativ_notification.notification.queue.flush_outgoing",
-        "kreativ_notification.notification.queue.retry_failed",
-    ],
     "cron": {
-        "*/5 * * * *": [
-            "kreativ_notification.notification.health.check_openwa_session",
-            "kreativ_notification.notification.health.check_inbound_webhook_health",
+        # dispatcher safety net: due retries + stuck rows
+        "*/2 * * * *": [
+            "kreativ_notification.notification.dispatcher.process_due_retries",
         ],
-        "*/10 * * * *": [
-            "kreativ_notification.notification.employee_notifications.retry_missed_notifications",
+        # fallback channel escalation
+        "*/5 * * * *": [
+            "kreativ_notification.notification.dispatcher.process_fallbacks",
+            "kreativ_notification.kreativ_notification.doctype.notification_channel.notification_channel.check_all_channels",
         ],
     },
+    "daily": [
+        # Days Before / Days After rules (payment reminders etc.)
+        "kreativ_notification.notification.rules_engine.evaluate_date_rules",
+        # log retention
+        "kreativ_notification.notification.dispatcher.cleanup_old_logs",
+    ],
 }
 
 # Document Events
 doc_events = {
-    "Salary Slip": {
-        "on_submit": [
-            "kreativ_notification.notification.salary_slip_hooks.on_salary_slip_whatsapp",
-        ]
-    },
-    "Employee Checkin": {
-        "on_change": "kreativ_notification.notification.hooks.on_checkin_updated",
-        "on_trash": "kreativ_notification.notification.hooks.on_checkin_trashed",
-        "after_insert": "kreativ_notification.notification.hooks.on_checkin_created",
+    "Notification Rule": {
+        "on_update": "kreativ_notification.notification.rules_engine.clear_rule_cache",
+        "on_trash": "kreativ_notification.notification.rules_engine.clear_rule_cache",
     },
 }
 
@@ -78,4 +96,18 @@ after_install = "kreativ_notification.install.after_install"
 patches = [
     "kreativ_notification.patches.v16_0.migrate_openwa_settings_fields",
     "kreativ_notification.patches.v16_0.migrate_whatsapp_send_log",
+    "kreativ_notification.patches.v16_0.add_platform_fields_to_send_log",
 ]
+
+# Fixtures — ship the default rules/templates that replace the old
+# hardcoded Salary Slip + Employee Checkin behavior
+fixtures = [
+    {"dt": "Message Template", "filters": [["module", "=", "Kreativ Notification"]]},
+    {"dt": "Notification Rule", "filters": [["module", "=", "Kreativ Notification"]]},
+]
+
+# Extensibility — other apps can add channel drivers and bot commands
+# via these hooks in THEIR hooks.py:
+#
+#   notification_channel_drivers = {"Telegram": "my_app.drivers.TelegramDriver"}
+#   whatsapp_bot_commands = ["my_app.bot.leave_balance_command"]

@@ -1,0 +1,6 @@
+{
+	"js/kreativ_notification.min.js": [
+		"kreativ_notification/public/js/kreativ_notification.js",
+		"kreativ_notification/public/js/print_whatsapp_v4.js"
+	]
+}

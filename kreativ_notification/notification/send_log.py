@@ -1,5 +1,6 @@
-"""WhatsApp Send Log helper — thin wrapper around the DocType."""
+"""WhatsApp Send Log helper — delegates to the DocType owned by gravures_custom."""
 import frappe
+from frappe.utils import now_datetime
 
 
 def create_log(
@@ -13,18 +14,22 @@ def create_log(
 ) -> str:
     """Create a WhatsApp Send Log entry and return its name."""
     try:
-        from kreativ_notification.kreativ_notification.doctype.whatsapp_send_log.whatsapp_send_log import (
-            create_log as _create,
-        )
-        return _create(
-            source_doctype=source_doctype,
-            source_docname=source_docname,
-            recipient=recipient,
-            message_type=message_type,
-            recipient_display=recipient_display,
-            source_print_format=source_print_format,
-            meta=meta or {},
-        )
+        log = frappe.get_doc({
+            "doctype": "WhatsApp Send Log",
+            "source_doctype": source_doctype,
+            "source_docname": source_docname,
+            "recipient": recipient,
+            "recipient_display": recipient_display or "",
+            "message_type": message_type,
+            "source_print_format": source_print_format or "",
+            "status": "Queued",
+            "sent_by": frappe.session.user,
+            "sent_at": now_datetime(),
+            "meta": frappe.as_json(meta or {}),
+        })
+        log.insert(ignore_permissions=True)
+        frappe.db.commit()
+        return log.name
     except Exception:
         frappe.log_error(
             title="WhatsApp Send Log creation failed",
@@ -33,15 +38,16 @@ def create_log(
         return None
 
 
-def update_log_status(log_name: str, success: bool, error_message: str = ""):
+def update_log_status(log_name: str, status: str, error_message: str = None):
     """Update WhatsApp Send Log with result."""
     if not log_name:
         return
     try:
-        from kreativ_notification.kreativ_notification.doctype.whatsapp_send_log.whatsapp_send_log import (
-            update_log_status as _update,
-        )
-        _update(log_name, "Sent" if success else "Failed", error_message or None)
+        frappe.db.set_value("WhatsApp Send Log", log_name, {
+            "status": status,
+            "error_message": error_message or "",
+        }, update_modified=False)
+        frappe.db.commit()
     except Exception:
         frappe.log_error(
             title="WhatsApp Send Log update failed",

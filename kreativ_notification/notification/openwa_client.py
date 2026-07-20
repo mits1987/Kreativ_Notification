@@ -425,10 +425,11 @@ def _update_log(log_name: str | None, status: str, error: str | None = None) -> 
     if not log_name:
         return
     try:
-        from kreativ_notification.kreativ_notification.doctype.whatsapp_send_log.whatsapp_send_log import (
-            update_log_status,
-        )
-        update_log_status(log_name, status, error)
+        frappe.db.set_value("WhatsApp Send Log", log_name, {
+            "status": status,
+            "error_message": error or "",
+        }, update_modified=False)
+        frappe.db.commit()
     except Exception:
         pass
 

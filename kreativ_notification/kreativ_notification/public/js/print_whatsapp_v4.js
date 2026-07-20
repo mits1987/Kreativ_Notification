@@ -170,7 +170,7 @@
 
                 // Server-side validation via phonenumbers library
                 frappe.call({
-                    method: "kreativ_notification.notification.contacts.validate_phone_number",
+                    method: "gravures_custom.overrides.validate_phone_number",
                     args: { phone: clean },
                     callback: function (r) {
                         $btn.prop("disabled", false).html("Send");
@@ -236,7 +236,7 @@
 
         // Fetch chats from backend
         frappe.call({
-            method: "kreativ_notification.notification.openwa_client.get_whatsapp_chats",
+            method: "gravures_custom.overrides.get_whatsapp_chats",
             callback: function (r) {
                 if (!r.message) {
                     d.fields_dict.picker_html.$wrapper.html(
@@ -415,7 +415,7 @@
         $picker.html('<div style="text-align:center;padding:30px;color:#999;font-size:13px;">Searching contacts...</div>');
 
         frappe.call({
-            method: "kreativ_notification.notification.contacts.search_whatsapp_contacts",
+            method: "gravures_custom.overrides.search_whatsapp_contacts",
             args: { query: query },
             callback: function (r) {
                 if (!r.message) {
@@ -451,7 +451,7 @@
                 frappe.show_alert({ message: "Sending PDF to " + safeChatName + "...", indicator: "blue" });
 
                 frappe.call({
-                    method: "kreativ_notification.notification.send.send_document_via_whatsapp",
+                    method: "gravures_custom.overrides.send_print_pdf_whatsapp",
                     args: {
                         doctype: doctype,
                         name: name,
@@ -541,15 +541,10 @@ function hasWhatsAppPermission() {
         try {
             // console.log('[print_whatsapp_v3] injectIntoToolbar called');
             // Guard: only inject on print preview pages
-            if (!isPrintRoute()) { // console.log('[print_whatsapp_v3] isPrintRoute false'); return false; }
-
-            // Permission check: only System Manager or HR Manager can see the button
-            if (!hasWhatsAppPermission()) {
-                // console.log('[print_whatsapp_v3] User lacks WhatsApp permission');
-                return false;
-            }
-
-            // Check if button already exists in toolbar
+            if (!isPrintRoute()) { return false; }
+// Permission check: only System Manager or HR Manager can see the button
+            if (!hasWhatsAppPermission()) { return false; }
+// Check if button already exists in toolbar
             if ($(".page-actions .custom-actions .btn-whatsapp-gc, .custom-actions .btn-whatsapp-gc").length) {
                 // console.log('[print_whatsapp_v3] button already exists');
                 return true;
@@ -558,9 +553,8 @@ function hasWhatsAppPermission() {
             var $ca = $(".page-actions .custom-actions, .custom-actions");
             // console.log('[print_whatsapp_v3] custom-actions found:', $ca.length);
 
-            if (!$ca || !$ca.length) { // console.log('[print_whatsapp_v3] no custom-actions'); return false; }
-
-            // Make custom-actions visible on print preview (it has hide class)
+            if (!$ca || !$ca.length) { return false; }
+// Make custom-actions visible on print preview (it has hide class)
             $ca.removeClass('hide hidden-xs hidden-md');
 
             var $btn = $(
@@ -584,8 +578,7 @@ function hasWhatsAppPermission() {
             // Insert next to Refresh button (last) or prepend
             var $refresh = $ca.find("button:contains('Refresh')").last();
             if ($refresh.length) { $refresh.after($btn); }
-            else { $ca.prepend($btn); }
-            // console.log('[print_whatsapp_v3] button injected in toolbar');
+            else { $ca.prepend($btn); };
             return true;
         } catch (e) { console.error('[print_whatsapp_v3] inject error:', e); return false; }
     }
@@ -660,8 +653,6 @@ function hasWhatsAppPermission() {
         } catch (e) {
             console.error('[print_whatsapp_v3] startInjector error:', e);
         }
-    }
-
-    // console.log('[WA Print] startInjector called');
+    };
     startInjector();
 })();
