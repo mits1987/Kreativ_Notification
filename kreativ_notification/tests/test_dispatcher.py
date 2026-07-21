@@ -9,6 +9,7 @@ Covers:
 import json
 import unittest
 from unittest.mock import Mock, patch, MagicMock
+from datetime import time
 from frappe.tests import IntegrationTestCase
 import frappe
 
@@ -140,8 +141,7 @@ class TestFallbackSkipsQuietHours(IntegrationTestCase):
     """FIX v3.3: Fallback skips quiet-hours-deferred rows AND fires for failed status."""
 
     @patch("kreativ_notification.notification.dispatcher.frappe.get_all")
-    @patch("kreativ_notification.notification.dispatcher.frappe.db.set_value")
-    def test_fallback_skips_quiet_hours_deferred(self, mock_set_value, mock_get_all):
+    def test_fallback_skips_quiet_hours_deferred(self, mock_get_all):
         """Rows with error_message 'Quiet hours' are skipped by fallback."""
         mock_get_all.return_value = [
             {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x", "meta": "{}",
@@ -239,14 +239,17 @@ class TestCleanupOldLogs(IntegrationTestCase):
         assert mock_delete.call_count == 2
         # First call: Sent, Delivered, Read
         call_args_1 = mock_delete.call_args_list[0]
-        status_list_1 = call_args_1[0][1].get("status", [])
+        # call_args is (args, kwargs) - args[0] is doctype, args[1] is filters dict
+        filters_1 = call_args_1[0][1]
+        status_list_1 = filters_1.get("status", [])
         assert "Sent" in status_list_1
         assert "Delivered" in status_list_1
         assert "Read" in status_list_1
 
         # Second call: Failed, Permanently Failed
         call_args_2 = mock_delete.call_args_list[1]
-        status_list_2 = call_args_2[0][1].get("status", [])
+        filters_2 = call_args_2[0][1]
+        status_list_2 = filters_2.get("status", [])
         assert "Failed" in status_list_2
         assert "Permanently Failed" in status_list_2
 
@@ -258,7 +261,8 @@ class TestCleanupOldLogs(IntegrationTestCase):
         cleanup_old_logs(days_failed=3)
 
         call_args = mock_delete.call_args
-        status_list = call_args[0][1].get("status", [])
+        filters = call_args[0][1]
+        status_list = filters.get("status", [])
         assert "Failed" in status_list
 
 
@@ -283,12 +287,14 @@ class TestRetryRescheduleBehavior(IntegrationTestCase):
 
         _reschedule("LOG-1", retry_count=0, error="timeout")
         call_args = mock_set_value.call_args
-        assert call_args[0][1]["retry_count"] == 1
+        filters = call_args[0][1]
+        assert filters["retry_count"] == 1
 
         mock_set_value.reset_mock()
         _reschedule("LOG-1", retry_count=1, error="timeout")
         call_args = mock_set_value.call_args
-        assert call_args[0][1]["retry_count"] == 2
+        filters = call_args[0][1]
+        assert filters["retry_count"] == 2
 
 
 class TestQuietHoursWait(IntegrationTestCase):
@@ -304,9 +310,7 @@ class TestQuietHoursWait(IntegrationTestCase):
         mock_ch.quiet_hours_start = "22:00:00"
         mock_ch.quiet_hours_end = "08:00:00"
         mock_get_cached_doc.return_value = mock_ch
-        # Return time object for "14:00:00" (2 PM)
-        from datetime import time
-        mock_get_time.return_value = time(14, 0, 0)
+        mock_get_time.return_value = time(14, 0, 0)  # 2 PM
         mock_nowtime.return_value = time(14, 0, 0)
 
         wait = _quiet_hours_wait("Test Channel")
@@ -322,9 +326,7 @@ class TestQuietHoursWait(IntegrationTestCase):
         mock_ch.quiet_hours_start = "22:00:00"
         mock_ch.quiet_hours_end = "08:00:00"
         mock_get_cached_doc.return_value = mock_ch
-        # Return time object for "02:00:00" (2 AM)
-        from datetime import time
-        mock_get_time.return_value = time(2, 0, 0)
+        mock_get_time.return_value = time(2, 0, 0)  # 2 AM
         mock_nowtime.return_value = time(2, 0, 0)
 
         wait = _quiet_hours_wait("Test Channel")
@@ -391,7 +393,7 @@ class TestIdempotency(IntegrationTestCase):
     @patch("kreativ_notification.notification.dispatcher.frappe.db.get_value")
     def test_idempotency_allows_retry_after_failed(self, mock_get_value, mock_enqueue, mock_get_driver):
         """Retry allowed if original status was Failed."""
-        mock_get_value.return_value = {"name": "LOG-EXISTING", "status": "Failed"}
+        mock_get_value.return_value = type('obj', (object,), {"name": "LOG-EXISTING", "status": "Failed"})()
         mock_driver = MagicMock()
         mock_driver.normalize_recipient.return_value = "919999999999@c.us"
         mock_driver.send_text.return_value = {"success": True, "message_id": "msg-123"}

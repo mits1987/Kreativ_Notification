@@ -2,6 +2,7 @@
 
 Shared between inbound webhook handler and OpenWA Settings.
 """
+import frappe
 import hmac
 import hashlib
 
