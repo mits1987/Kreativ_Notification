@@ -1,13 +1,33 @@
 """PDF generation utilities."""
 import frappe
 import base64
+import subprocess
+import tempfile
+import os
+import shutil
+
+
+def _chrome_path() -> str:
+    """Return path to Chrome/Chromium binary."""
+    configured = frappe.conf.get("chrome_path")
+    if configured and os.path.exists(configured):
+        return configured
+    for binary in ("chromium", "chromium-browser", "google-chrome",
+                   "google-chrome-stable", "chrome", "headless_shell"):
+        path = shutil.which(binary)
+        if path:
+            return path
+    frappe.throw(
+        "No Chromium binary found. Set 'chrome_path' in site_config.json, "
+        'e.g. "chrome_path": "/home/mitesh/frappe-bench-v16/chromium/chrome-linux/headless_shell"'
+    )
 
 
 def generate_pdf_bytes(doctype: str, name: str, print_format: str = None) -> bytes:
-    """Generate PDF bytes for a document using wkhtmltopdf (ERPNext default).
+    """Generate PDF bytes for a document using headless Chromium.
 
-    Rewrites /files/ image URLs to base64 data URIs so wkhtmltopdf can render them
-    without needing network access to the Frappe site.
+    Rewrites /files/ image URLs to base64 data URIs and strips action banner
+    before sending HTML to Chromium for PDF generation.
     """
     # Get HTML first (not PDF) so we can rewrite image URLs
     html = frappe.get_print(
@@ -22,12 +42,58 @@ def generate_pdf_bytes(doctype: str, name: str, print_format: str = None) -> byt
     # Strip action banner (print toolbar)
     html = _strip_action_banner(html)
 
-    # Now generate PDF from the rewritten HTML using internal get_pdf
-    pdf_bytes = frappe.utils.pdf.get_pdf(html)
+    # Generate PDF using headless Chromium
+    return _generate_pdf_from_html(html)
 
-    if isinstance(pdf_bytes, str):
-        return base64.b64decode(pdf_bytes)
-    return pdf_bytes
+
+def generate_pdf_from_html(html: str) -> bytes:
+    """Generate PDF from HTML string using headless Chromium.
+
+    Applies image rewrite and banner stripping for consistency.
+    """
+    # Rewrite /files/... image URLs to base64 data URIs
+    html = _rewrite_image_src_for_pdf(html)
+
+    # Strip action banner (print toolbar)
+    html = _strip_action_banner(html)
+
+    # Generate PDF using headless Chromium
+    return _generate_pdf_from_html(html)
+
+
+def _generate_pdf_from_html(html: str) -> bytes:
+    """Internal: generate PDF from HTML using headless Chromium."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False, encoding="utf-8") as f:
+        f.write(html)
+        html_path = f.name
+
+    pdf_path = html_path.replace(".html", ".pdf")
+    try:
+        chrome = _chrome_path()
+        result = subprocess.run(
+            [
+                chrome,
+                "--headless=new",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--print-to-pdf=" + pdf_path,
+                f"file://{html_path}",
+            ],
+            timeout=30,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            raise Exception(f"Chromium PDF failed: {result.stderr.decode()}")
+
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+        return pdf_bytes
+    finally:
+        for p in (html_path, pdf_path):
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
 
 
 def _rewrite_image_src_for_pdf(html: str) -> str:

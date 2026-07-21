@@ -153,22 +153,29 @@ def process_incoming_message(payload: dict):
         if not _check_rate_limit(reply_to):
             return
 
+        # Find employee by phone number and get their linked user_id
+        employee_user_id = _get_employee_user_id(reply_to)
+        if not employee_user_id:
+            # Not an authorized employee - silently ignore
+            frappe.logger().info(f"WhatsApp message from unauthorized number: {reply_to}")
+            return
+
         # Check conversation state first (for multi-step flows like ledger)
         conversation = _get_conversation_state(reply_to)
         if conversation:
-            _handle_conversation_reply(reply_to, message_text, conversation)
+            _handle_conversation_reply(reply_to, message_text, conversation, employee_user_id)
             return
 
         # Try invoice keywords
         invoice_identifier = _parse_invoice_reference(message_text, settings)
         if invoice_identifier:
-            _handle_invoice_request(reply_to, invoice_identifier)
+            _handle_invoice_request(reply_to, invoice_identifier, employee_user_id)
             return
 
         # Try ledger keywords
         ledger_term = _parse_ledger_reference(message_text, settings)
         if ledger_term:
-            _handle_ledger_request(reply_to, ledger_term)
+            _handle_ledger_request(reply_to, ledger_term, employee_user_id)
             return
 
         # No keyword matched — send help
@@ -182,7 +189,7 @@ def process_incoming_message(payload: dict):
 # Invoice bot
 # ---------------------------------------------------------------------------
 
-def _handle_invoice_request(reply_to: str, identifier: str):
+def _handle_invoice_request(reply_to: str, identifier: str, employee_user_id: str):
     invoice_name = _find_sales_invoice(identifier)
     if not invoice_name:
         _send_text(reply_to, f"Invoice '{identifier}' not found or not submitted.")
@@ -193,22 +200,23 @@ def _handle_invoice_request(reply_to: str, identifier: str):
     settings = frappe.get_cached_doc("OpenWA Settings")
     print_format = settings.invoice_print_format or "Standard"
 
+    original_user = frappe.session.user
     try:
-        frappe.set_user("Administrator")
+        frappe.set_user(employee_user_id)
         pdf_bytes = generate_pdf_bytes("Sales Invoice", invoice_name, print_format)
-        frappe.set_user(None)
         if isinstance(pdf_bytes, bytes):
             base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
         else:
             base64_pdf = pdf_bytes
     except Exception:
-        frappe.set_user(None)
+        frappe.set_user(original_user)
         frappe.log_error(title=f"PDF Generation Failed for {invoice_name}", message=frappe.get_traceback())
         _send_text(reply_to, f"Failed to generate PDF for {invoice_name}.")
         increment_circuit_breaker()
         return
+    finally:
+        frappe.set_user(original_user)
 
-    from kreativ_notification.notification.send import send_document_via_whatsapp
     result = send_document_via_whatsapp(
         base64_pdf,
         f"{invoice_name}.pdf",
@@ -270,14 +278,14 @@ def _find_sales_invoice(identifier: str) -> Optional[str]:
 # Ledger bot
 # ---------------------------------------------------------------------------
 
-def _handle_ledger_request(reply_to: str, search_term: str):
+def _handle_ledger_request(reply_to: str, search_term: str, employee_user_id: str):
     customers = _search_customers(search_term)
     if not customers:
         _send_text(reply_to, f"No customers found matching '{search_term}'.")
         return
 
     if len(customers) == 1:
-        _send_ledger_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to)
+        _send_ledger_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to, employee_user_id)
         return
 
     # Multiple matches — send numbered list, save conversation state
@@ -320,10 +328,11 @@ def _search_customers(search_term: str) -> list:
     )
 
 
-def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str):
+def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
+    original_user = frappe.session.user
     try:
+        frappe.set_user(employee_user_id)
         from erpnext.accounts.report.general_ledger.general_ledger import execute as get_gl
-        from frappe.utils.pdf import get_pdf
 
         company = frappe.db.get_single_value("Global Defaults", "default_company")
         filters = frappe._dict({
@@ -358,13 +367,15 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str):
             "body": html, "css": get_print_style(),
             "title": f"Statement - {customer_display or customer_name}"
         })
-        pdf_bytes = get_pdf(full_html, {"orientation": "Landscape"})
+
+        # Generate PDF using headless Chromium (embeds letterhead images as base64)
+        from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
+        pdf_bytes = generate_pdf_from_html(full_html)
 
         b64 = base64.b64encode(pdf_bytes).decode("utf-8")
         filename = f"Statement_{customer_name}.pdf"
         caption = f"Statement of Accounts — {customer_display or customer_name}"
 
-        from kreativ_notification.notification.send import send_document_via_whatsapp
         send_document_via_whatsapp(
             b64, filename, caption,
             chat_id_override=reply_to,
@@ -374,13 +385,15 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str):
     except Exception:
         frappe.log_error(title="Ledger PDF generation failed", message=frappe.get_traceback())
         _send_text(reply_to, "Failed to generate ledger PDF. Please try again later.")
+    finally:
+        frappe.set_user(original_user)
 
 
 # ---------------------------------------------------------------------------
 # Conversation state machine
 # ---------------------------------------------------------------------------
 
-def _handle_conversation_reply(reply_to: str, message_text: str, conversation: dict):
+def _handle_conversation_reply(reply_to: str, message_text: str, conversation: dict, employee_user_id: str):
     conv_type = conversation.get("type")
 
     if conv_type == "ledger_selection":
@@ -390,7 +403,7 @@ def _handle_conversation_reply(reply_to: str, message_text: str, conversation: d
             if 1 <= choice <= len(customers):
                 selected = customers[choice - 1]
                 _clear_conversation_state(reply_to)
-                _send_ledger_pdf(selected["name"], selected.get("customer_name", ""), reply_to)
+                _send_ledger_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
             else:
                 _send_text(reply_to, f"Please enter a number between 1 and {len(customers)}.")
         except ValueError:
@@ -416,6 +429,31 @@ def _clear_conversation_state(chat_id: str):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _get_employee_user_id(phone_number: str) -> str | None:
+    """Find employee by cell_number and return their linked user_id.
+
+    Normalizes phone from '91xxxxxxxxxx@c.us' format and matches
+    against Employee.cell_number (last 10 digits).
+    """
+    # Normalize phone: "91xxxxxxxxxx@c.us" -> "91xxxxxxxxxx"
+    clean_phone = phone_number
+    if "@" in clean_phone:
+        clean_phone = clean_phone.split("@")[0]
+    # Remove leading + if present
+    clean_phone = clean_phone.lstrip("+")
+
+    # Find employee by cell_number (which may have various formats)
+    employees = frappe.get_all(
+        "Employee",
+        filters={"cell_number": ["like", f"%{clean_phone[-10:]}%"], "status": "Active"},
+        fields=["name", "user_id"],
+        limit=1,
+    )
+    if employees and employees[0].get("user_id"):
+        return employees[0]["user_id"]
+    return None
+
 
 def _extract_message_text(message) -> str:
     if isinstance(message, list):

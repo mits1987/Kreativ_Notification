@@ -138,6 +138,6 @@ def send_test_message() -> dict:
         text="✅ Test message from ERPNext — your WhatsApp channel is working.",
         message_type="Test",
         source_doctype="OpenWA Settings",
-        source_docname="test",
+        source_docname="OpenWA Settings",
         priority="Urgent",  # bypasses quiet hours: a test should send NOW
     )
