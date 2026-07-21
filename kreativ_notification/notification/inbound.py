@@ -344,11 +344,14 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str):
             _send_text(reply_to, f"No ledger entries found for {customer_display or customer_name}.")
             return
 
+        # Get default letterhead for PDF
+        letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
+
         html = frappe.render_template(
             "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
             {"filters": filters, "data": result,
              "report": {"report_name": "General Ledger", "columns": columns},
-             "ageing": None, "letterhead": None, "terms_and_conditions": None}
+             "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
         )
         from frappe.www.printview import get_print_style
         full_html = frappe.render_template("frappe/www/printview.html", {
@@ -440,8 +443,8 @@ def _send_text(chat_id: str, text: str) -> bool:
     return send_text_via_whatsapp(
         text,
         chat_id_override=chat_id,
-        source_doctype="System",
-        source_docname="inbound-bot",
+        source_doctype="OpenWA Settings",
+        source_docname="OpenWA Settings",
     ).get("success", False)
 
 

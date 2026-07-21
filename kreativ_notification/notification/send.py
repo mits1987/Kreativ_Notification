@@ -25,7 +25,18 @@ from kreativ_notification.notification.dispatcher import dispatch
 
 def _default_chat(settings=None) -> str | None:
     settings = settings or frappe.get_cached_doc("OpenWA Settings")
-    return settings.chat_id or None
+    base_chat = settings.chat_id or None
+    if settings.test_mode and settings.test_chat_id:
+        return settings.test_chat_id
+    return base_chat
+
+
+def _apply_test_mode(chat_id: str, settings=None) -> str:
+    """Route to test_chat_id when test_mode is enabled."""
+    settings = settings or frappe.get_cached_doc("OpenWA Settings")
+    if settings.test_mode and settings.test_chat_id:
+        return settings.test_chat_id
+    return chat_id
 
 
 def send_document_via_whatsapp(
@@ -38,11 +49,13 @@ def send_document_via_whatsapp(
     source_print_format: str = "",
 ) -> dict:
     """Send a PDF/document via WhatsApp (pre-rendered, base64)."""
-    chat_id = chat_id_override or _default_chat()
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    chat_id = chat_id_override or _default_chat(settings)
     if not chat_id:
         return {"success": False,
                 "error": "No recipient: pass chat_id_override or set the "
                          "default Chat ID in OpenWA Settings."}
+    chat_id = _apply_test_mode(chat_id, settings)
 
     return dispatch(
         recipient=chat_id,
@@ -67,11 +80,13 @@ def send_image_via_whatsapp(
     source_docname: str = "",
 ) -> dict:
     """Send an image/screenshot via WhatsApp (pre-rendered, base64)."""
-    chat_id = chat_id_override or _default_chat()
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    chat_id = chat_id_override or _default_chat(settings)
     if not chat_id:
         return {"success": False,
                 "error": "No recipient: pass chat_id_override or set the "
                          "default Chat ID in OpenWA Settings."}
+    chat_id = _apply_test_mode(chat_id, settings)
 
     return dispatch(
         recipient=chat_id,
@@ -93,16 +108,18 @@ def send_text_via_whatsapp(
     source_docname: str = "",
 ) -> dict:
     """Send a plain text message via WhatsApp."""
-    chat_id = chat_id_override or _default_chat()
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    chat_id = chat_id_override or _default_chat(settings)
     if not chat_id:
         return {"success": False,
                 "error": "No recipient: pass chat_id_override or set the "
                          "default Chat ID in OpenWA Settings."}
+    chat_id = _apply_test_mode(chat_id, settings)
 
     return dispatch(
         recipient=chat_id,
         text=text,
-        message_type="Custom Text",
+        message_type="Custom",
         source_doctype=source_doctype,
         source_docname=source_docname,
         priority="Normal",
@@ -120,7 +137,7 @@ def send_test_message() -> dict:
         recipient=settings.chat_id,
         text="✅ Test message from ERPNext — your WhatsApp channel is working.",
         message_type="Test",
-        source_doctype="System",
+        source_doctype="OpenWA Settings",
         source_docname="test",
         priority="Urgent",  # bypasses quiet hours: a test should send NOW
     )

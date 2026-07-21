@@ -98,6 +98,7 @@ patches = [
 fixtures = [
     {"dt": "Message Template", "filters": [["module", "=", "Kreativ Notification"]]},
     {"dt": "Notification Rule", "filters": [["module", "=", "Kreativ Notification"]]},
+    {"dt": "WhatsApp Send Log"},
 ]
 
 # Extensibility — other apps can add channel drivers and bot commands

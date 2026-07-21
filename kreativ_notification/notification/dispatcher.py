@@ -92,9 +92,9 @@ def dispatch(
             LOG_DOCTYPE, {"idempotency_key": idempotency_key},
             ["name", "status"], as_dict=True,
         )
-        if existing and existing.status not in ("Failed",):
+        if existing and existing["status"] not in ("Failed",):
             return {"success": True, "status": "duplicate",
-                    "log_name": existing.name,
+                    "log_name": existing["name"],
                     "message": _("Already sent/queued (idempotent).")}
 
     log = frappe.get_doc({
@@ -171,20 +171,20 @@ def deliver(log_name: str):
     row = frappe.db.get_value(LOG_DOCTYPE, log_name,
                               ["status", "channel", "recipient", "meta",
                                "retry_count", "priority"], as_dict=True)
-    if not row or row.status != "Processing":
+    if not row or row["status"] != "Processing":
         return  # someone else claimed it, or it's already terminal
 
-    meta = json.loads(row.meta or "{}")
-    channel = row.channel
+    meta = json.loads(row["meta"] or "{}")
+    channel = row["channel"]
 
     # ---- Circuit breaker (transport-level only) --------------------------
     if _breaker_open(channel):
-        _reschedule(log_name, row.retry_count,
+        _reschedule(log_name, row["retry_count"],
                     error="Circuit breaker open — channel failing", count_attempt=False)
         return
 
     # ---- Quiet hours (Urgent bypasses) -----------------------------------
-    if row.priority != "Urgent":
+    if row["priority"] != "Urgent":
         wait_min = _quiet_hours_wait(channel)
         if wait_min:
             _defer(log_name, minutes=wait_min, reason=DEFER_QUIET_HOURS)
@@ -202,10 +202,10 @@ def deliver(log_name: str):
         _finalize(log_name, False, f"Driver error: {e}", permanent=True)
         return
 
-    normalized = driver.normalize_recipient(row.recipient)
-    if not normalized:
+    _normalized = driver.normalize_recipient(row["recipient"])
+    if not _normalized:
         _finalize(log_name, False,
-                  f"Invalid recipient for {driver.driver_type}: {row.recipient}",
+                  f"Invalid recipient for {driver.driver_type}: {row['recipient']}",
                   permanent=True)
         return
 
@@ -222,19 +222,19 @@ def deliver(log_name: str):
     try:
         if meta.get("meta_template_name") and driver.supports_templates:
             result = driver.send_template(
-                normalized, meta["meta_template_name"],
+                _normalized, meta["meta_template_name"],
                 meta.get("meta_template_language") or "en",
             )
         elif file_b64:
             result = driver.send_document(
-                normalized, file_b64,
+                _normalized, file_b64,
                 meta.get("filename") or "document.pdf",
                 mimetype=meta.get("mimetype") or "application/pdf",
                 caption=meta.get("text") or "",
                 subject=meta.get("subject") or "",
             )
         else:
-            result = driver.send_text(normalized, meta.get("text") or "",
+            result = driver.send_text(_normalized, meta.get("text") or "",
                                       subject=meta.get("subject") or "")
     except Exception as e:
         frappe.log_error(title=f"Driver crashed: {channel}",
@@ -258,7 +258,7 @@ def deliver(log_name: str):
             _finalize(log_name, False, result.get("error"), permanent=True)
         else:
             _breaker_trip(channel)
-            _reschedule(log_name, row.retry_count, error=result.get("error"))
+            _reschedule(log_name, row["retry_count"], error=result.get("error"))
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +329,7 @@ def process_due_retries():
         limit_page_length=100,
     )
     for row in due + fresh:
-        _enqueue_delivery(row.name, row.priority or "Normal")
+        _enqueue_delivery(row["name"], row["priority"] or "Normal")
 
 
 def process_fallbacks():
@@ -351,29 +351,29 @@ def process_fallbacks():
         limit_page_length=50,
     )
     for row in overdue:
-        meta = json.loads(row.meta or "{}")
-        frappe.db.set_value(LOG_DOCTYPE, row.name, "fallback_fired", 1,
+        meta = json.loads(row["meta"] or "{}")
+        frappe.db.set_value(LOG_DOCTYPE, row["name"], "fallback_fired", 1,
                             update_modified=False)
 
         # FIX v3: re-attach cached file payload so PDF escalates with attachment
         file_b64 = None
         if meta.get("has_file"):
-            file_b64 = frappe.cache().get_value(_payload_key(row.name))
+            file_b64 = frappe.cache().get_value(_payload_key(row["name"]))
 
         dispatch(
-            recipient=row.recipient,
-            channel=row.fallback_channel,
+            recipient=row["recipient"],
+            channel=row["fallback_channel"],
             text=meta.get("text") or "",
             subject=meta.get("subject") or "",
             file_b64=file_b64,
             filename=meta.get("filename"),
             mimetype=meta.get("mimetype"),
-            message_type=row.message_type,
-            source_doctype=row.source_doctype,
-            source_docname=row.source_docname,
-            priority=row.priority or "Normal",
+            message_type=row["message_type"],
+            source_doctype=row["source_doctype"],
+            source_docname=row["source_docname"],
+            priority=row["priority"] or "Normal",
             idempotency_key=None,  # a fallback is a NEW logical send
-            rule=row.notification_rule,
+            rule=row["notification_rule"],
         )
     if overdue:
         frappe.db.commit()
