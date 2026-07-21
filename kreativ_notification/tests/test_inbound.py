@@ -53,7 +53,7 @@ class TestBotHelpers(IntegrationTestCase):
         from kreativ_notification.notification.inbound import _handle_invoice_request
 
         with patch("kreativ_notification.notification.inbound._find_sales_invoice", return_value=None):
-            _handle_invoice_request("919999999999@c.us", "NONEXISTENT")
+            _handle_invoice_request("919999999999@c.us", "NONEXISTENT", "test-user-id")
         mock_send_text.assert_called_once()
         args = mock_send_text.call_args[0]
         self.assertIn("not found", args[1].lower())
@@ -66,7 +66,7 @@ class TestBotHelpers(IntegrationTestCase):
 
         mock_search.return_value = []
 
-        _handle_ledger_request("919999999999@c.us", "NonExistent")
+        _handle_ledger_request("919999999999@c.us", "NonExistent", "test-user-id")
         mock_send_text.assert_called_once()
         args = mock_send_text.call_args[0]
         self.assertIn("no customers found", args[1].lower())

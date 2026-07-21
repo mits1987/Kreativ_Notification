@@ -11,13 +11,12 @@ from typing import Optional
 from frappe.utils import get_datetime, now_datetime
 
 from kreativ_notification.notification.openwa_client import (
-    OpenWAClient,
     check_circuit_breaker,
     increment_circuit_breaker,
     reset_circuit_breaker,
 )
-from kreativ_notification.notification.pdf_utils import generate_pdf_bytes
-from kreativ_notification.notification.send import send_document_via_whatsapp
+from kreativ_notification.notification.pdf_utils import generate_pdf_bytes, generate_pdf_from_html
+from kreativ_notification.notification.dispatcher import dispatch
 from kreativ_notification.notification.security import verify_webhook_signature
 
 
@@ -203,7 +202,7 @@ def _handle_invoice_request(reply_to: str, identifier: str, employee_user_id: st
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
-        pdf_bytes = generate_pdf_bytes("Sales Invoice", invoice_name, print_format)
+        pdf_bytes = generate_pdf_bytes("Sales Invoice", invoice_name, print_format, channel_name="WhatsApp - OpenWA")
         if isinstance(pdf_bytes, bytes):
             base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
         else:
@@ -217,14 +216,17 @@ def _handle_invoice_request(reply_to: str, identifier: str, employee_user_id: st
     finally:
         frappe.set_user(original_user)
 
-    result = send_document_via_whatsapp(
-        base64_pdf,
-        f"{invoice_name}.pdf",
-        f"Invoice: {invoice_name}",
-        chat_id_override=reply_to,
+    result = dispatch(
+        recipient=reply_to,
+        text=f"Invoice: {invoice_name}",
+        file_b64=base64_pdf,
+        filename=f"{invoice_name}.pdf",
+        mimetype="application/pdf",
+        message_type="Print PDF",
         source_doctype="Sales Invoice",
         source_docname=invoice_name,
         source_print_format=print_format,
+        priority="Normal",
     )
 
     if result.get("success"):
@@ -370,17 +372,22 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, e
 
         # Generate PDF using headless Chromium (embeds letterhead images as base64)
         from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
-        pdf_bytes = generate_pdf_from_html(full_html)
+        pdf_bytes = generate_pdf_from_html(full_html, channel_name="WhatsApp - OpenWA")
 
         b64 = base64.b64encode(pdf_bytes).decode("utf-8")
         filename = f"Statement_{customer_name}.pdf"
         caption = f"Statement of Accounts — {customer_display or customer_name}"
 
-        send_document_via_whatsapp(
-            b64, filename, caption,
-            chat_id_override=reply_to,
+        dispatch(
+            recipient=reply_to,
+            text=caption,
+            file_b64=b64,
+            filename=filename,
+            mimetype="application/pdf",
+            message_type="Print PDF",
             source_doctype="Customer",
             source_docname=customer_name,
+            priority="Normal",
         )
     except Exception:
         frappe.log_error(title="Ledger PDF generation failed", message=frappe.get_traceback())

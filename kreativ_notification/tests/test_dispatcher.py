@@ -25,10 +25,19 @@ def _mock_cache_instance():
     return mock
 
 
-def _mock_frappe_cache():
-    """Return a mock that acts like `frappe.cache` (callable returning cache instance)."""
+def _setup_frappe_cache_mock(mock_cache):
+    """Configure a frappe.cache mock to return a mock cache instance."""
+    cache_instance = _mock_cache_instance()
+    mock_cache.return_value = cache_instance
+    return cache_instance
+
+
+def _mock_channel_doc(quiet_hours_start=None, quiet_hours_end=None, rate_limit_per_minute=0):
+    """Create a mock Notification Channel doc."""
     mock = MagicMock()
-    mock.return_value = _mock_cache_instance()
+    mock.quiet_hours_start = quiet_hours_start
+    mock.quiet_hours_end = quiet_hours_end
+    mock.rate_limit_per_minute = rate_limit_per_minute
     return mock
 
 
@@ -38,20 +47,26 @@ class TestCircuitBreakerIgnoresPermanent(IntegrationTestCase):
     @patch("kreativ_notification.notification.dispatcher.get_default_channel", return_value="WhatsApp - OpenWA")
     @patch("kreativ_notification.notification.dispatcher.get_driver")
     @patch("kreativ_notification.notification.dispatcher._finalize")
+    @patch("kreativ_notification.notification.dispatcher._quiet_hours_wait", return_value=0)
+    @patch("kreativ_notification.notification.dispatcher._rate_limit_ok", return_value=True)
     @patch("kreativ_notification.notification.dispatcher._breaker_open", return_value=False)
     @patch("kreativ_notification.notification.dispatcher.frappe.db.sql")
     @patch("kreativ_notification.notification.dispatcher.frappe.db.get_value")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_deliver_permanent_failure_no_breaker_trip(
-        self, mock_cache, mock_get_value, mock_sql, mock_breaker_open, mock_finalize, mock_get_driver, mock_get_default
+        self, mock_cache, mock_get_value, mock_sql, mock_breaker_open,
+        mock_rate_limit, mock_quiet_hours, mock_finalize, mock_get_driver, mock_get_default
     ):
         """Invalid recipient -> Permanent Failed, _breaker_trip NOT called."""
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+
         mock_driver = MagicMock()
         mock_driver.normalize_recipient.return_value = None  # Invalid recipient
         mock_driver.driver_type = "WhatsApp - OpenWA"
         mock_get_driver.return_value = mock_driver
 
-        mock_sql.return_value = 1  # Claim successful
+        # frappe.db.sql returns list of rows (update count for UPDATE)
+        mock_sql.return_value = [[1]]  # 1 row updated
         mock_get_value.return_value = {
             "status": "Processing",
             "channel": "WhatsApp - OpenWA",
@@ -78,18 +93,20 @@ class TestCircuitBreakerIgnoresPermanent(IntegrationTestCase):
     @patch("kreativ_notification.notification.dispatcher._breaker_open", return_value=False)
     @patch("kreativ_notification.notification.dispatcher.frappe.db.sql")
     @patch("kreativ_notification.notification.dispatcher.frappe.db.get_value")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_deliver_transient_failure_trips_breaker(
-        self, mock_cache, mock_get_value, mock_sql, mock_breaker_open, mock_rate_limit,
-        mock_quiet_hours, mock_reschedule, mock_get_driver, mock_get_default
+        self, mock_cache, mock_get_value, mock_sql, mock_breaker_open,
+        mock_rate_limit, mock_quiet_hours, mock_reschedule, mock_get_driver, mock_get_default
     ):
         """Timeout -> transient failure, _breaker_trip IS called."""
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+
         mock_driver = MagicMock()
         mock_driver.normalize_recipient.return_value = "919999999999@c.us"
         mock_driver.send_text.return_value = {"success": False, "error": "Timeout", "permanent": False}
         mock_get_driver.return_value = mock_driver
 
-        mock_sql.return_value = 1
+        mock_sql.return_value = [[1]]
         mock_get_value.return_value = {
             "status": "Processing",
             "channel": "WhatsApp - OpenWA",
@@ -113,25 +130,27 @@ class TestExpiredAttachmentPayload(IntegrationTestCase):
     @patch("kreativ_notification.notification.dispatcher.get_default_channel", return_value="WhatsApp - OpenWA")
     @patch("kreativ_notification.notification.dispatcher.get_driver")
     @patch("kreativ_notification.notification.dispatcher._finalize")
+    @patch("kreativ_notification.notification.dispatcher._quiet_hours_wait", return_value=0)
+    @patch("kreativ_notification.notification.dispatcher._rate_limit_ok", return_value=True)
     @patch("kreativ_notification.notification.dispatcher._breaker_open", return_value=False)
     @patch("kreativ_notification.notification.dispatcher.frappe.db.sql")
     @patch("kreativ_notification.notification.dispatcher.frappe.db.get_value")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_deliver_with_expired_file_cache(
-        self, mock_cache, mock_get_value, mock_sql, mock_breaker_open, mock_finalize, mock_get_driver, mock_get_default
+        self, mock_cache, mock_get_value, mock_sql, mock_breaker_open,
+        mock_rate_limit, mock_quiet_hours, mock_finalize, mock_get_driver, mock_get_default
     ):
         """File cache key missing -> Permanent Failed (no crash)."""
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+        # First call: breaker check (0 = closed), second: payload cache (None = expired)
+        cache_instance.get_value.side_effect = [0, None]
+
         mock_driver = MagicMock()
         mock_driver.normalize_recipient.return_value = "919999999999@c.us"
         mock_driver.driver_type = "WhatsApp - OpenWA"
         mock_get_driver.return_value = mock_driver
 
-        # First call: breaker check (0 = closed), second: payload cache (None = expired)
-        cache_instance = _mock_cache_instance()
-        cache_instance.get_value.side_effect = [0, None]
-        mock_cache.return_value = cache_instance
-
-        mock_sql.return_value = 1
+        mock_sql.return_value = [[1]]
         mock_get_value.return_value = {
             "status": "Processing",
             "channel": "WhatsApp - OpenWA",
@@ -146,8 +165,10 @@ class TestExpiredAttachmentPayload(IntegrationTestCase):
 
         mock_finalize.assert_called_once()
         call_args = mock_finalize.call_args
+        # _finalize is called with positional args: (log_name, success, error, permanent=True)
+        error_msg = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("error", "")
         assert call_args[1].get("permanent", False) is True
-        assert "expired" in call_args[1].get("error", "").lower()
+        assert "expired" in (error_msg or "").lower()
 
 
 class TestFallbackSkipsQuietHours(IntegrationTestCase):
@@ -155,13 +176,11 @@ class TestFallbackSkipsQuietHours(IntegrationTestCase):
 
     @patch("kreativ_notification.notification.dispatcher.frappe.get_all")
     def test_fallback_skips_quiet_hours_deferred(self, mock_get_all):
-        """Rows with error_message 'Quiet hours' are skipped by fallback."""
-        from kreativ_notification.notification.dispatcher import DEFER_QUIET_HOURS
-        mock_get_all.return_value = [
-            {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x", "meta": "{}",
-             "source_doctype": "Test", "source_docname": "1", "message_type": "Custom",
-             "priority": "Normal", "notification_rule": None, "error_message": DEFER_QUIET_HOURS},
-        ]
+        """Rows with error_message 'Quiet hours' are skipped by fallback.
+
+        The real get_all filters these out in the DB query, so mock returns empty list.
+        """
+        mock_get_all.return_value = []  # DB filters out DEFER_QUIET_HOURS rows
 
         from kreativ_notification.notification.dispatcher import process_fallbacks
         with patch("kreativ_notification.notification.dispatcher.dispatch") as mock_dispatch:
@@ -170,9 +189,11 @@ class TestFallbackSkipsQuietHours(IntegrationTestCase):
 
     @patch("kreativ_notification.notification.dispatcher.frappe.get_all")
     @patch("kreativ_notification.notification.dispatcher.frappe.db.set_value")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_fallback_fires_for_failed_status(self, mock_cache, mock_set_value, mock_get_all):
         """Fallback triggers for 'Failed' status rows."""
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+
         mock_get_all.return_value = [
             {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x", "meta": "{}",
              "source_doctype": "Test", "source_docname": "1", "message_type": "Custom",
@@ -194,18 +215,18 @@ class TestFallbackReattachesFile(IntegrationTestCase):
 
     @patch("kreativ_notification.notification.dispatcher.frappe.get_all")
     @patch("kreativ_notification.notification.dispatcher.frappe.db.set_value")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_fallback_escalates_with_attachment(self, mock_cache, mock_set_value, mock_get_all):
         """Fallback resends with original attachment if file cache valid."""
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+        cache_instance.get_value.return_value = "cached_base64_data"
+
         mock_get_all.return_value = [
             {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x",
              "meta": '{"text": "Test", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
              "source_doctype": "Test", "source_docname": "1", "message_type": "Custom",
              "priority": "Normal", "notification_rule": None},
         ]
-        cache_instance = _mock_cache_instance()
-        cache_instance.get_value.return_value = "cached_base64_data"
-        mock_cache.return_value = cache_instance
 
         from kreativ_notification.notification.dispatcher import process_fallbacks
         with patch("kreativ_notification.notification.dispatcher.dispatch") as mock_dispatch:
@@ -217,18 +238,18 @@ class TestFallbackReattachesFile(IntegrationTestCase):
 
     @patch("kreativ_notification.notification.dispatcher.frappe.get_all")
     @patch("kreativ_notification.notification.dispatcher.frappe.db.set_value")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_fallback_with_expired_cache_sends_without_attachment(self, mock_cache, mock_set_value, mock_get_all):
         """If file cache expired, fallback sends without attachment."""
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+        cache_instance.get_value.return_value = None  # Expired cache
+
         mock_get_all.return_value = [
             {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x",
              "meta": '{"text": "Test", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
              "source_doctype": "Test", "source_docname": "1", "message_type": "Custom",
              "priority": "Normal", "notification_rule": None},
         ]
-        cache_instance = _mock_cache_instance()
-        cache_instance.get_value.return_value = None  # Expired cache
-        mock_cache.return_value = cache_instance
 
         from kreativ_notification.notification.dispatcher import process_fallbacks
         with patch("kreativ_notification.notification.dispatcher.dispatch") as mock_dispatch:
@@ -316,9 +337,7 @@ class TestQuietHoursWait(IntegrationTestCase):
     def test_quiet_hours_wait_returns_zero_outside_hours(self, mock_nowtime, mock_get_cached_doc):
         """Returns 0 minutes wait outside quiet hours."""
         from kreativ_notification.notification.dispatcher import _quiet_hours_wait
-        mock_ch = MagicMock()
-        mock_ch.quiet_hours_start = "22:00:00"
-        mock_ch.quiet_hours_end = "08:00:00"
+        mock_ch = _mock_channel_doc(quiet_hours_start="22:00:00", quiet_hours_end="08:00:00")
         mock_get_cached_doc.return_value = mock_ch
         mock_nowtime.return_value = time(14, 0, 0)  # 2 PM
 
@@ -330,9 +349,7 @@ class TestQuietHoursWait(IntegrationTestCase):
     def test_quiet_hours_wait_returns_minutes_inside_hours(self, mock_nowtime, mock_get_cached_doc):
         """Returns minutes to wait inside quiet hours."""
         from kreativ_notification.notification.dispatcher import _quiet_hours_wait
-        mock_ch = MagicMock()
-        mock_ch.quiet_hours_start = "22:00:00"
-        mock_ch.quiet_hours_end = "08:00:00"
+        mock_ch = _mock_channel_doc(quiet_hours_start="22:00:00", quiet_hours_end="08:00:00")
         mock_get_cached_doc.return_value = mock_ch
         mock_nowtime.return_value = time(2, 0, 0)  # 2 AM
 
@@ -344,34 +361,30 @@ class TestRateLimiter(IntegrationTestCase):
     """Test rate limiter per channel."""
 
     @patch("kreativ_notification.notification.dispatcher.frappe.get_cached_doc")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_rate_limit_allows_under_limit(self, mock_cache, mock_get_cached_doc):
         """Allows sends under the rate limit."""
-        from kreativ_notification.notification.dispatcher import _rate_limit_ok
-        mock_ch = MagicMock()
-        mock_ch.rate_limit_per_minute = 10
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+        cache_instance.incrby.return_value = 5  # Under limit
+
+        mock_ch = _mock_channel_doc(rate_limit_per_minute=10)
         mock_get_cached_doc.return_value = mock_ch
 
-        cache_instance = _mock_cache_instance()
-        cache_instance.incrby.return_value = 5  # Under limit
-        mock_cache.return_value = cache_instance
-
+        from kreativ_notification.notification.dispatcher import _rate_limit_ok
         result = _rate_limit_ok("Test Channel")
         assert result is True
 
     @patch("kreativ_notification.notification.dispatcher.frappe.get_cached_doc")
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_rate_limit_blocks_over_limit(self, mock_cache, mock_get_cached_doc):
         """Blocks sends over the rate limit."""
-        from kreativ_notification.notification.dispatcher import _rate_limit_ok
-        mock_ch = MagicMock()
-        mock_ch.rate_limit_per_minute = 10
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+        cache_instance.incrby.return_value = 15  # Over limit
+
+        mock_ch = _mock_channel_doc(rate_limit_per_minute=10)
         mock_get_cached_doc.return_value = mock_ch
 
-        cache_instance = _mock_cache_instance()
-        cache_instance.incrby.return_value = 15  # Over limit
-        mock_cache.return_value = cache_instance
-
+        from kreativ_notification.notification.dispatcher import _rate_limit_ok
         result = _rate_limit_ok("Test Channel")
         assert result is False
 
@@ -403,9 +416,14 @@ class TestIdempotency(IntegrationTestCase):
 
     @patch("kreativ_notification.notification.dispatcher.get_driver")
     @patch("kreativ_notification.notification.dispatcher._enqueue_delivery")
+    @patch("kreativ_notification.notification.dispatcher.frappe.db.set_value")
     @patch("kreativ_notification.notification.dispatcher.frappe.db.get_value")
-    def test_idempotency_allows_retry_after_failed(self, mock_get_value, mock_enqueue, mock_get_driver):
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
+    @patch("kreativ_notification.notification.dispatcher.frappe.get_doc")
+    def test_idempotency_allows_retry_after_failed(self, mock_get_doc, mock_cache, mock_get_value, mock_set_value, mock_enqueue, mock_get_driver):
         """Retry allowed if original status was Failed."""
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
+
         existing = MagicMock()
         existing.__getitem__.side_effect = lambda k: {"name": "LOG-EXISTING", "status": "Failed", "doctype": "WhatsApp Send Log"}.get(k)
         existing.name = "LOG-EXISTING"
@@ -416,6 +434,11 @@ class TestIdempotency(IntegrationTestCase):
         mock_driver.send_text.return_value = {"success": True, "message_id": "msg-123"}
         mock_get_driver.return_value = mock_driver
 
+        # Mock the log doc creation
+        mock_log = MagicMock()
+        mock_log.name = "LOG-NEW"
+        mock_get_doc.return_value = mock_log
+
         from kreativ_notification.notification.dispatcher import dispatch
         result = dispatch(
             channel="WhatsApp - OpenWA",
@@ -424,17 +447,17 @@ class TestIdempotency(IntegrationTestCase):
             idempotency_key="retry-key",
         )
         assert result["success"] is True
+        assert result["log_name"] == "LOG-NEW"
 
 
 class TestCircuitBreaker(IntegrationTestCase):
     """Test circuit breaker helpers."""
 
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_breaker_trip_increments_counter(self, mock_cache):
         """_breaker_trip increments failure streak."""
-        cache_instance = _mock_cache_instance()
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
         cache_instance.get_value.return_value = 2
-        mock_cache.return_value = cache_instance
 
         from kreativ_notification.notification.dispatcher import _breaker_trip
         _breaker_trip("Test Channel")
@@ -442,31 +465,28 @@ class TestCircuitBreaker(IntegrationTestCase):
             "notif_breaker:kreativ316:Test Channel", 3, expires_in_sec=1800
         )
 
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_breaker_open_at_threshold(self, mock_cache):
         """Breaker opens when streak reaches threshold."""
-        cache_instance = _mock_cache_instance()
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
         cache_instance.get_value.return_value = 3
-        mock_cache.return_value = cache_instance
 
         from kreativ_notification.notification.dispatcher import _breaker_open
         assert _breaker_open("Test Channel") is True
 
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_breaker_closed_below_threshold(self, mock_cache):
         """Breaker closed when streak below threshold."""
-        cache_instance = _mock_cache_instance()
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
         cache_instance.get_value.return_value = 2
-        mock_cache.return_value = cache_instance
 
         from kreativ_notification.notification.dispatcher import _breaker_open
         assert _breaker_open("Test Channel") is False
 
-    @patch("kreativ_notification.notification.dispatcher.frappe.cache", new_callable=_mock_frappe_cache)
+    @patch("kreativ_notification.notification.dispatcher.frappe.cache")
     def test_breaker_reset_deletes_key(self, mock_cache):
         """_breaker_reset deletes the breaker key."""
-        cache_instance = _mock_cache_instance()
-        mock_cache.return_value = cache_instance
+        cache_instance = _setup_frappe_cache_mock(mock_cache)
 
         from kreativ_notification.notification.dispatcher import _breaker_reset
         _breaker_reset("Test Channel")

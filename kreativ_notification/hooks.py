@@ -22,13 +22,6 @@ app_include_js = [
     "/assets/kreativ_notification/js/print_whatsapp_v4.js?v=20260720",
 ]
 
-# Force import of API module before every request to ensure whitelisted methods are registered.
-# This is needed because gunicorn workers (even with --preload) don't import app modules
-# until they're needed. The @frappe.whitelist() decorator only executes on first import.
-before_request = [
-    "kreativ_notification.ensure_api_loaded",
-]
-
 # ---------------------------------------------------------------------------
 # Doc events
 #

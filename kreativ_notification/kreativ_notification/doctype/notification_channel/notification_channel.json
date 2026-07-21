@@ -122,6 +122,13 @@
    "label": "Session ID"
   },
   {
+   "depends_on": "eval:doc.channel_type=='WhatsApp - OpenWA'",
+   "description": "Absolute path to Chromium/Chrome binary. Leave empty to auto-detect via PATH.",
+   "fieldname": "chromium_path",
+   "fieldtype": "Data",
+   "label": "Chromium Path"
+  },
+  {
    "fieldname": "column_break_creds",
    "fieldtype": "Column Break"
   },

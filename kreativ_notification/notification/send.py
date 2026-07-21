@@ -4,7 +4,7 @@ v2 — CONSOLIDATED. The public function signatures are UNCHANGED (so
 dashboard_senders.py, api.py, print_whatsapp_v4.js call-paths and
 inbound.py keep working without edits), but every function now routes
 through dispatcher.dispatch() instead of the legacy
-openwa_client.enqueue_whatsapp_send() path.
+openwa_client.enqueue_whatsapp_send() path (removed).
 
 What callers gain for free:
     - outbox Send Log row created BEFORE the network call
@@ -104,7 +104,7 @@ def send_image_via_whatsapp(
 def send_text_via_whatsapp(
     text: str,
     chat_id_override: str = None,
-    source_doctype: str = "System",
+    source_doctype: str = "OpenWA Settings",
     source_docname: str = "",
 ) -> dict:
     """Send a plain text message via WhatsApp."""

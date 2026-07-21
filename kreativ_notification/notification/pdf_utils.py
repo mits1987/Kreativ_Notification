@@ -7,23 +7,40 @@ import os
 import shutil
 
 
-def _chrome_path() -> str:
-    """Return path to Chrome/Chromium binary."""
+def _chrome_path(channel_name: str = None) -> str:
+    """Return path to Chrome/Chromium binary.
+
+    Priority:
+    1. webhook_secret field on Notification Channel (if channel_name provided)
+    2. chrome_path in site_config.json / common_site_config.json
+    3. known binary names on PATH
+    """
+    # Check Notification Channel for chromium_path
+    if channel_name:
+        channel_path = frappe.db.get_value("Notification Channel", channel_name, "chromium_path")
+        if channel_path and os.path.exists(channel_path):
+            return channel_path
+
+    # Check site config
     configured = frappe.conf.get("chrome_path")
     if configured and os.path.exists(configured):
         return configured
+
+    # Search PATH
     for binary in ("chromium", "chromium-browser", "google-chrome",
                    "google-chrome-stable", "chrome", "headless_shell"):
         path = shutil.which(binary)
         if path:
             return path
+
     frappe.throw(
-        "No Chromium binary found. Set 'chrome_path' in site_config.json, "
+        "No Chromium binary found. Set 'chromium_path' on Notification Channel "
+        "or 'chrome_path' in site_config.json, "
         'e.g. "chrome_path": "/home/mitesh/frappe-bench-v16/chromium/chrome-linux/headless_shell"'
     )
 
 
-def generate_pdf_bytes(doctype: str, name: str, print_format: str = None) -> bytes:
+def generate_pdf_bytes(doctype: str, name: str, print_format: str = None, channel_name: str = None) -> bytes:
     """Generate PDF bytes for a document using headless Chromium.
 
     Rewrites /files/ image URLs to base64 data URIs and strips action banner
@@ -43,10 +60,10 @@ def generate_pdf_bytes(doctype: str, name: str, print_format: str = None) -> byt
     html = _strip_action_banner(html)
 
     # Generate PDF using headless Chromium
-    return _generate_pdf_from_html(html)
+    return _generate_pdf_from_html(html, channel_name)
 
 
-def generate_pdf_from_html(html: str) -> bytes:
+def generate_pdf_from_html(html: str, channel_name: str = None) -> bytes:
     """Generate PDF from HTML string using headless Chromium.
 
     Applies image rewrite and banner stripping for consistency.
@@ -58,10 +75,10 @@ def generate_pdf_from_html(html: str) -> bytes:
     html = _strip_action_banner(html)
 
     # Generate PDF using headless Chromium
-    return _generate_pdf_from_html(html)
+    return _generate_pdf_from_html(html, channel_name)
 
 
-def _generate_pdf_from_html(html: str) -> bytes:
+def _generate_pdf_from_html(html: str, channel_name: str = None) -> bytes:
     """Internal: generate PDF from HTML using headless Chromium."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False, encoding="utf-8") as f:
         f.write(html)
@@ -69,7 +86,7 @@ def _generate_pdf_from_html(html: str) -> bytes:
 
     pdf_path = html_path.replace(".html", ".pdf")
     try:
-        chrome = _chrome_path()
+        chrome = _chrome_path(channel_name)
         result = subprocess.run(
             [
                 chrome,
