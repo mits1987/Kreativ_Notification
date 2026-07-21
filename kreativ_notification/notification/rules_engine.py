@@ -188,11 +188,23 @@ def evaluate_date_rules():
             if meta.is_submittable:
                 filters["docstatus"] = 1
 
-            names = frappe.get_all(r.document_type, filters=filters,
-                                   pluck="name", limit_page_length=500)
-            for name in names:
-                doc = frappe.get_doc(r.document_type, name)
-                _process_rule(r.name, doc, r.event, date_key=f":{today}")
+            # FIX: paginated loop — the old single get_all(limit_page_length=500)
+            # silently capped at 500 docs. Idempotency keys prevent double-fires
+            # if the job reruns.
+            start = 0
+            while True:
+                names = frappe.get_all(
+                    r.document_type, filters=filters, pluck="name",
+                    limit_start=start, limit_page_length=500,
+                )
+                if not names:
+                    break
+                for name in names:
+                    doc = frappe.get_doc(r.document_type, name)
+                    _process_rule(r.name, doc, r.event, date_key=f":{today}")
+                if len(names) < 500:
+                    break
+                start += 500
         except Exception:
             frappe.log_error(title=f"Date rule failed: {r.name}",
                              message=frappe.get_traceback())

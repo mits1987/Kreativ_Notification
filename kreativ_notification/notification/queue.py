@@ -1,15 +1,41 @@
-"""Queue management for Notification Queue doctype."""
+"""Queue management for Notification Queue doctype.
+
+v3 — DEDUPLICATED. Notification Queue used to be a second, competing
+pipeline: process_send() called the legacy send_* helpers with NO
+idempotency key, and retry_failed() re-queued failed items up to 3 times.
+One queue item could therefore produce up to 4 independent Send Log rows
+and 4 real WhatsApp sends — each of which ALSO got the dispatcher's own
+5-attempt retry ladder (retry-inside-retry).
+
+Now every queue item maps to exactly ONE logical send:
+
+    idempotency_key = f"queue:{queue_item}"
+
+The dispatcher dedupes on that key while the send is Queued / Processing /
+Sent, and only allows a re-dispatch after a genuine "Failed" — so
+retry_failed() becomes safe: it can re-queue as often as it likes without
+ever multiplying deliveries.
+
+DEPRECATION NOTE: this doctype is now a thin shim over dispatch(). New
+code should call dispatcher.dispatch() directly. Once nothing writes to
+Notification Queue any more, delete this module, the doctype, and any
+scheduler entries pointing here.
+"""
+import json
+
 import frappe
 from frappe import _
 
+from kreativ_notification.notification.dispatcher import dispatch
+
 
 def flush_outgoing():
-    """ =ALL= job: drain queued sends from Notification Queue."""
+    """Scheduler job: drain queued sends from Notification Queue."""
     try:
         queue_items = frappe.get_all(
             "Notification Queue",
             filters={"status": "Queued"},
-            fields=["name", "action_type", "reference_doctype", "reference_docname", "recipient", "payload"],
+            fields=["name"],
             order_by="creation asc",
             limit_page_length=50,
         )
@@ -24,6 +50,8 @@ def flush_outgoing():
                     "kreativ_notification.notification.queue.process_send",
                     queue="long",
                     timeout=300,
+                    # job_id dedupes concurrent enqueues of the same item
+                    job_id=f"notif-queue-{item.name}",
                     queue_item=item.name,
                 )
                 processed += 1
@@ -41,7 +69,12 @@ def flush_outgoing():
 
 
 def retry_failed():
-    """ =ALL= job: retry failed sends from Notification Queue."""
+    """Scheduler job: retry failed sends from Notification Queue.
+
+    Safe now: re-dispatching the same queue item reuses the idempotency
+    key queue:{name}, so the dispatcher refuses to create a duplicate
+    unless the previous logical send actually terminated as Failed.
+    """
     try:
         failed_items = frappe.get_all(
             "Notification Queue",
@@ -56,10 +89,13 @@ def retry_failed():
 
         retried = 0
         for item in failed_items:
-            if item.attempts >= 3:
+            if (item.attempts or 0) >= 3:
                 continue
             try:
-                frappe.db.set_value("Notification Queue", item.name, {"status": "Queued", "attempts": item.attempts + 1})
+                frappe.db.set_value(
+                    "Notification Queue", item.name,
+                    {"status": "Queued", "attempts": (item.attempts or 0) + 1},
+                )
                 frappe.db.commit()
                 retried += 1
             except Exception:
@@ -73,78 +109,72 @@ def retry_failed():
 
 
 def process_send(queue_item: str):
-    """Background worker: process a single Notification Queue item."""
+    """Background worker: hand a single Notification Queue item to dispatch().
+
+    The dispatcher owns transport, retries, rate limits, quiet hours and
+    the circuit breaker. This function only translates the queue row into
+    a dispatch() call with a stable idempotency key.
+    """
     try:
         doc = frappe.get_doc("Notification Queue", queue_item)
+        if doc.status not in ("Queued",):
+            return  # already handled
+
         doc.status = "Processing"
         doc.save(ignore_permissions=True)
         frappe.db.commit()
 
-        from kreativ_notification.notification.send import (
-            send_document_via_whatsapp,
-            send_image_via_whatsapp,
-            send_text_via_whatsapp,
+        try:
+            payload = json.loads(doc.payload or "{}")
+        except (ValueError, TypeError):
+            payload = {}
+
+        idem = f"queue:{queue_item}"
+        common = dict(
+            recipient=doc.recipient,
+            source_doctype=doc.reference_doctype or "System",
+            source_docname=doc.reference_docname or "",
+            priority="Normal",
+            idempotency_key=idem,
         )
 
-        payload = frappe.parse_json(doc.payload) if doc.payload else {}
-
-        result = {"success": False, "error": "Unknown action"}
-
         if doc.action_type == "send_pdf":
-            result = send_document_via_whatsapp(
-                payload.get("base64", ""),
-                payload.get("filename", "document.pdf"),
-                payload.get("caption", ""),
-                chat_id_override=doc.recipient,
-                source_doctype=doc.reference_doctype,
-                source_docname=doc.reference_docname,
+            result = dispatch(
+                text=payload.get("caption") or payload.get("filename") or "",
+                file_b64=payload.get("file_b64"),
+                filename=payload.get("filename") or "document.pdf",
+                mimetype="application/pdf",
+                message_type="Print PDF",
+                source_print_format=payload.get("print_format") or "",
+                **common,
             )
         elif doc.action_type == "send_screenshot":
-            result = send_image_via_whatsapp(
-                payload.get("base64", ""),
-                payload.get("filename", "screenshot.png"),
-                payload.get("caption", ""),
-                chat_id_override=doc.recipient,
-                source_doctype=doc.reference_doctype,
-                source_docname=doc.reference_docname,
+            result = dispatch(
+                text=payload.get("caption") or payload.get("filename") or "",
+                file_b64=payload.get("file_b64"),
+                filename=payload.get("filename") or "screenshot.png",
+                mimetype="image/png",
+                message_type="Screenshot",
+                **common,
             )
         elif doc.action_type == "send_test":
-            result = send_text_via_whatsapp(
-                payload.get("text", "Test message"),
-                chat_id_override=doc.recipient,
-                source_doctype=doc.reference_doctype,
-                source_docname=doc.reference_docname,
+            result = dispatch(
+                text=payload.get("text") or "Test message from Kreativ Notification.",
+                message_type="Test",
+                **common,
             )
-        elif doc.action_type == "send_manual":
-            message_type = payload.get("message_type", "Custom")
-            if message_type in ("Print PDF", "Dispatch PDF"):
-                result = send_document_via_whatsapp(
-                    payload.get("file_b64", ""),
-                    payload.get("filename", "document"),
-                    payload.get("caption", ""),
-                    chat_id_override=doc.recipient,
-                    source_doctype=doc.reference_doctype,
-                    source_docname=doc.reference_docname,
-                )
-            elif message_type == "Screenshot":
-                result = send_image_via_whatsapp(
-                    payload.get("file_b64", ""),
-                    payload.get("filename", "screenshot"),
-                    payload.get("caption", ""),
-                    chat_id_override=doc.recipient,
-                    source_doctype=doc.reference_doctype,
-                    source_docname=doc.reference_docname,
-                )
-            else:
-                result = send_text_via_whatsapp(
-                    payload.get("text", ""),
-                    chat_id_override=doc.recipient,
-                    source_doctype=doc.reference_doctype,
-                    source_docname=doc.reference_docname,
-                )
+        else:  # send_manual / plain text
+            result = dispatch(
+                text=payload.get("text") or "",
+                message_type="Custom",
+                **common,
+            )
 
         if result.get("success"):
+            # "Sent" here means "accepted by the dispatcher" — final
+            # transport status lives in WhatsApp Send Log (result log_name).
             doc.status = "Sent"
+            doc.error_message = ""
         else:
             doc.status = "Failed"
             doc.error_message = result.get("error", "Unknown error")
@@ -153,7 +183,8 @@ def process_send(queue_item: str):
         frappe.db.commit()
 
     except Exception:
-        frappe.log_error(title=f"Queue process failed for {queue_item}", message=frappe.get_traceback())
+        frappe.log_error(title=f"Queue process failed for {queue_item}",
+                         message=frappe.get_traceback())
         try:
             doc = frappe.get_doc("Notification Queue", queue_item)
             doc.status = "Failed"

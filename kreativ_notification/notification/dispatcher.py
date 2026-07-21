@@ -11,6 +11,24 @@ Guarantees:
     - Quiet hours + per-channel rate limiting (Urgent bypasses quiet hours)
     - Fallback channel scheduling
     - Circuit breaker counts ONLY transport failures
+
+v3 CHANGES (marked with  # FIX v3):
+    1. Circuit breaker no longer trips on PERMANENT failures (bad number,
+       unconfigured channel). Three bad numbers in a row used to open the
+       breaker and stall the whole channel.
+    2. Attachment payload expired from cache -> clear Permanently Failed
+       with an explanatory error instead of silently sending text-only.
+    3. process_fallbacks: (a) skips rows that are only waiting out quiet
+       hours — a deliberately-held message no longer escalates to the
+       fallback channel at night; (b) re-attaches the cached file payload
+       so a salary-slip PDF escalated to email arrives WITH the PDF.
+    4. cleanup_old_logs now also prunes Delivered/Read rows (previously
+       only "Sent" — receipt-advanced rows grew forever).
+
+MERGE NOTE: this file was reconstructed from the reviewed sources. Diff
+against your current dispatcher.py before replacing — if your deliver()
+has extra branches (e.g. Meta template routing details) keep them; the
+FIX v3 blocks are the only intended behaviour changes.
 """
 
 from __future__ import annotations
@@ -30,6 +48,10 @@ MAX_ATTEMPTS = 5
 BACKOFF_MINUTES = [1, 5, 15, 60, 180]
 
 CIRCUIT_THRESHOLD = 3
+
+# Reason strings written by _defer(); process_fallbacks keys off these.
+DEFER_QUIET_HOURS = "Quiet hours"
+DEFER_RATE_LIMIT = "Rate limit"
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +187,12 @@ def deliver(log_name: str):
     if row.priority != "Urgent":
         wait_min = _quiet_hours_wait(channel)
         if wait_min:
-            _defer(log_name, minutes=wait_min, reason="Quiet hours")
+            _defer(log_name, minutes=wait_min, reason=DEFER_QUIET_HOURS)
             return
 
     # ---- Per-channel rate limit ------------------------------------------
     if not _rate_limit_ok(channel):
-        _defer(log_name, minutes=1, reason="Rate limit")
+        _defer(log_name, minutes=1, reason=DEFER_RATE_LIMIT)
         return
 
     # ---- Resolve driver + recipient --------------------------------------
@@ -189,6 +211,13 @@ def deliver(log_name: str):
 
     # ---- Send ------------------------------------------------------------
     file_b64 = frappe.cache().get_value(_payload_key(log_name)) if meta.get("has_file") else None
+
+    # FIX v3: cache expired -> permanent failure with clear error
+    if meta.get("has_file") and not file_b64:
+        _finalize(log_name, False,
+                  "Attachment expired from cache (6h TTL). Re-queue the send.",
+                  permanent=True)
+        return
 
     try:
         if meta.get("meta_template_name") and driver.supports_templates:
@@ -223,10 +252,12 @@ def deliver(log_name: str):
         frappe.db.commit()
         frappe.cache().delete_value(_payload_key(log_name))
     else:
-        _breaker_trip(channel)
+        # FIX v3: only trip breaker on TRANSPORT failures (non-permanent)
         if result.get("permanent"):
+            # Bad number, unconfigured channel etc. — do NOT open breaker
             _finalize(log_name, False, result.get("error"), permanent=True)
         else:
+            _breaker_trip(channel)
             _reschedule(log_name, row.retry_count, error=result.get("error"))
 
 
@@ -303,6 +334,8 @@ def process_due_retries():
 
 def process_fallbacks():
     """Cron: fire fallback channel for messages not Sent/Delivered in time."""
+    # FIX v3: skip rows whose ONLY problem is quiet-hours deferral. A message
+    # deliberately held until morning should not silently escalate at 02:00.
     overdue = frappe.get_all(
         LOG_DOCTYPE,
         filters={
@@ -310,6 +343,7 @@ def process_fallbacks():
             "fallback_fired": 0,
             "fallback_deadline": ["<=", now_datetime()],
             "status": ["in", ["Queued", "Processing", "Failed"]],
+            "error_message": ["!=", DEFER_QUIET_HOURS],  # FIX v3
         },
         fields=["name", "fallback_channel", "recipient", "meta",
                 "source_doctype", "source_docname", "message_type",
@@ -320,16 +354,25 @@ def process_fallbacks():
         meta = json.loads(row.meta or "{}")
         frappe.db.set_value(LOG_DOCTYPE, row.name, "fallback_fired", 1,
                             update_modified=False)
+
+        # FIX v3: re-attach cached file payload so PDF escalates with attachment
+        file_b64 = None
+        if meta.get("has_file"):
+            file_b64 = frappe.cache().get_value(_payload_key(row.name))
+
         dispatch(
             recipient=row.recipient,
             channel=row.fallback_channel,
             text=meta.get("text") or "",
             subject=meta.get("subject") or "",
+            file_b64=file_b64,
+            filename=meta.get("filename"),
+            mimetype=meta.get("mimetype"),
             message_type=row.message_type,
             source_doctype=row.source_doctype,
             source_docname=row.source_docname,
             priority=row.priority or "Normal",
-            idempotency_key=None,  # a fallback is a new logical send
+            idempotency_key=None,  # a fallback is a NEW logical send
             rule=row.notification_rule,
         )
     if overdue:
@@ -337,9 +380,12 @@ def process_fallbacks():
 
 
 def cleanup_old_logs(days_sent: int = 90, days_failed: int = 180):
-    """Daily: prune old logs so the table doesn't grow forever."""
+    """Daily: prune old logs so the table doesn't grow forever.
+
+    FIX v3: also prune Delivered/Read rows (they used to accumulate forever).
+    """
     frappe.db.delete(LOG_DOCTYPE, {
-        "status": "Sent",
+        "status": ["in", ["Sent", "Delivered", "Read"]],
         "creation": ["<", add_to_date(now_datetime(), days=-days_sent)],
     })
     frappe.db.delete(LOG_DOCTYPE, {

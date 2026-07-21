@@ -1,40 +1,56 @@
 """PDF generation utilities."""
 import frappe
 import base64
-import subprocess
-import tempfile
-import os
-import re
 
 
 def generate_pdf_bytes(doctype: str, name: str, print_format: str = None) -> bytes:
-    """Generate PDF bytes for a document using headless Chromium."""
-    pdf_bytes = frappe.get_print(
+    """Generate PDF bytes for a document using wkhtmltopdf (ERPNext default).
+
+    Rewrites /files/ image URLs to base64 data URIs so wkhtmltopdf can render them
+    without needing network access to the Frappe site.
+    """
+    # Get HTML first (not PDF) so we can rewrite image URLs
+    html = frappe.get_print(
         doctype, name,
         print_format=print_format or None,
-        as_pdf=True,
+        as_pdf=False,
     )
+
+    # Rewrite /files/... image URLs to base64 data URIs
+    html = _rewrite_image_src_for_pdf(html)
+
+    # Strip action banner (print toolbar)
+    html = _strip_action_banner(html)
+
+    # Now generate PDF from the rewritten HTML using internal get_pdf
+    pdf_bytes = frappe.utils.pdf.get_pdf(html)
+
     if isinstance(pdf_bytes, str):
         return base64.b64decode(pdf_bytes)
     return pdf_bytes
 
 
 def _rewrite_image_src_for_pdf(html: str) -> str:
-    """Rewrite /files/... image URLs to base64 data URIs for headless Chromium."""
+    """Rewrite /files/... image URLs to base64 data URIs by reading from filesystem."""
     from bs4 import BeautifulSoup
-    import requests
+    import os
+    import mimetypes
 
     soup = BeautifulSoup(html, "html.parser")
+    files_path = frappe.utils.get_files_path()
+
     for img in soup.find_all("img"):
         src = img.get("src", "")
         if src.startswith("/files/"):
+            # Extract filename from /files/FILENAME
+            filename = src.split("/files/", 1)[1].split("?")[0]
+            file_path = os.path.join(files_path, filename)
             try:
-                file_url = frappe.utils.get_url() + src
-                resp = requests.get(file_url, timeout=10)
-                if resp.ok:
-                    import mimetypes
-                    mime = mimetypes.guess_type(src)[0] or "image/png"
-                    b64 = base64.b64encode(resp.content).decode("utf-8")
+                if os.path.exists(file_path):
+                    with open(file_path, "rb") as f:
+                        content = f.read()
+                    mime = mimetypes.guess_type(filename)[0] or "image/png"
+                    b64 = base64.b64encode(content).decode("utf-8")
                     img["src"] = f"data:{mime};base64,{b64}"
             except Exception:
                 pass

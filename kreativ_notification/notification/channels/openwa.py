@@ -74,7 +74,11 @@ class OpenWADriver(BaseChannelDriver):
         if res.get("success"):
             data = res.get("data") or {}
             return SendResult.ok(message_id=data.get("messageId"), raw=data)
-        return SendResult.fail(res.get("error") or "OpenWA send failed", raw=res)
+        return SendResult.fail(
+            res.get("error") or "OpenWA send failed",
+            raw=res,
+            permanent=res.get("permanent", False),
+        )
 
     def _send(self, method: str, *args, **kwargs) -> SendResult:
         client = self._client()

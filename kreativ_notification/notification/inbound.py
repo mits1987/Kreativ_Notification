@@ -3,8 +3,6 @@
 Single bot handles: invoice requests, account ledger requests, and help text.
 """
 import frappe
-import hmac
-import hashlib
 import re
 import json
 import base64
@@ -20,6 +18,13 @@ from kreativ_notification.notification.openwa_client import (
 )
 from kreativ_notification.notification.pdf_utils import generate_pdf_bytes
 from kreativ_notification.notification.send import send_document_via_whatsapp
+from kreativ_notification.notification.security import verify_webhook_signature
+
+
+def _respond(body: dict, http_status: int = 200) -> dict:
+    frappe.local.response["http_status_code"] = http_status
+    return body
+
 
 DEFAULT_INVOICE_KEYWORDS = "invoice,inv,बिल"
 DEFAULT_LEDGER_KEYWORDS = "ledger,statement,account,balance,बही"
@@ -36,32 +41,32 @@ def receive_whatsapp_message():
         payload = frappe.request.get_data()
         if not payload:
             frappe.log_error("Empty webhook payload received", "WhatsApp Webhook")
-            return {"status": "error", "message": "Empty payload"}, 400
+            return _respond({"status": "error", "message": "Empty payload"}, 400)
 
         settings = frappe.get_cached_doc("OpenWA Settings")
 
         if not settings.webhook_enabled:
-            return {"status": "ignored", "message": "Webhook not enabled"}, 200
+            return _respond({"status": "ignored", "message": "Webhook not enabled"})
 
         signature = frappe.get_request_header("X-OpenWA-Signature") or ""
         if settings.webhook_secret:
             if not signature:
                 frappe.logger().warning("webhook_secret is set but no signature header received")
-            elif not _verify_webhook_signature(payload, signature, settings.get_password("webhook_secret")):
+            elif not verify_webhook_signature(payload, signature, settings.get_password("webhook_secret")):
                 frappe.log_error("Invalid webhook signature", "WhatsApp Webhook")
-                return {"status": "error", "message": "Invalid signature"}, 401
+                return _respond({"status": "error", "message": "Invalid signature"}, 401)
 
         try:
             data = json.loads(payload.decode("utf-8"))
         except json.JSONDecodeError:
             frappe.log_error("Invalid JSON in webhook payload", "WhatsApp Webhook")
-            return {"status": "error", "message": "Invalid JSON"}, 400
+            return _respond({"status": "error", "message": "Invalid JSON"}, 400)
 
         event_type = frappe.get_request_header("X-OpenWA-Event") or ""
         if not event_type and isinstance(data, dict):
             event_type = data.get("event", "")
         if not event_type.startswith("message"):
-            return {"status": "ignored", "message": "Event not processed"}, 200
+            return _respond({"status": "ignored", "message": "Event not processed"})
 
         if isinstance(data, list):
             msg_data_list = data
@@ -78,7 +83,7 @@ def receive_whatsapp_message():
             msg_data_list = msg_data_list[0]
 
         if not msg_data_list:
-            return {"status": "ignored", "message": "No message data"}, 200
+            return _respond({"status": "ignored", "message": "No message data"})
 
         jobs_queued = 0
         for msg_data in msg_data_list:
@@ -119,13 +124,13 @@ def receive_whatsapp_message():
             jobs_queued += 1
 
         if jobs_queued == 0:
-            return {"status": "ignored", "message": "No valid messages to process"}, 200
+            return _respond({"status": "ignored", "message": "No valid messages to process"})
 
-        return {"status": "queued", "message": f"{jobs_queued} message(s) queued for processing"}, 202
+        return _respond({"status": "queued", "message": f"{jobs_queued} message(s) queued for processing"}, 202)
 
     except Exception:
         frappe.log_error(title="WhatsApp Webhook Error", message=frappe.get_traceback())
-        return {"status": "error", "message": "Internal error"}, 500
+        return _respond({"status": "error", "message": "Internal error"}, 500)
 
 
 def process_incoming_message(payload: dict):
@@ -428,13 +433,6 @@ def _extract_message_text(message) -> str:
     if "videoMessage" in message:
         return message["videoMessage"].get("caption", "")
     return ""
-
-
-def _verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
-    if not secret or not signature:
-        return False
-    expected = "sha256=" + hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
 
 
 def _send_text(chat_id: str, text: str) -> bool:

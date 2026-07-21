@@ -33,7 +33,7 @@
    "fieldname": "rule_name",
    "fieldtype": "Data",
    "label": "Rule Name",
-   "reqd": 0,
+   "reqd": 1,
    "unique": 1
   },
   {
@@ -52,7 +52,7 @@
    "fieldtype": "Link",
    "label": "Document Type",
    "options": "DocType",
-   "reqd": 0,
+   "reqd": 1,
    "in_standard_filter": 1,
    "in_list_view": 1
   },
@@ -74,7 +74,7 @@
    "fieldtype": "Select",
    "label": "Event",
    "options": "New\nSubmit\nCancel\nValue Change\nDays Before\nDays After",
-   "reqd": 0,
+   "reqd": 1,
    "in_list_view": 1
   },
   {
@@ -128,7 +128,7 @@
    "fieldtype": "Link",
    "label": "Message Template",
    "options": "Message Template",
-   "reqd": 0
+   "reqd": 1
   },
   {
    "fieldname": "column_break_msg",

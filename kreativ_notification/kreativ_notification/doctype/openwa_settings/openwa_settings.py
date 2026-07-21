@@ -1,10 +1,10 @@
 # Copyright (c) 2024, Kreativ Gravures
 # License: MIT
 
-import hmac
-import hashlib
 import frappe
 from frappe.model.document import Document
+
+from kreativ_notification.notification.security import verify_webhook_signature
 
 
 class OpenWASettings(Document):
@@ -114,14 +114,6 @@ def stop_session():
 		return {"status": "error", "message": f"Stop returned {r.status_code}: {r.text[:200]}"}
 	except Exception as e:
 		return {"status": "error", "message": str(e)}
-
-
-def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
-	"""Verify HMAC-SHA256 signature from OpenWA webhook."""
-	if not secret or not signature:
-		return False
-	expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-	return hmac.compare_digest(expected, signature)
 
 
 @frappe.whitelist()

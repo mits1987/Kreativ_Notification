@@ -105,6 +105,29 @@ class OpenWAClient:
         if not self.api_key:
             frappe.throw(_("OpenWA API Key is not configured."))
 
+    @staticmethod
+    def _classify_error(error: str) -> dict:
+        """Classify an error message to detect permanent vs transient failures.
+
+        Returns dict with keys: success (bool), error (str), permanent (bool).
+        """
+        error_lower = error.lower()
+        # Transient: gateway down, timeout, 5xx server errors
+        if any(keyword in error_lower for keyword in [
+            "cannot connect", "connection", "timeout", "timed out",
+            "http 500", "http 502", "http 503", "http 504",
+        ]):
+            return {"success": False, "error": error, "permanent": False}
+        # Permanent: invalid number, not registered, auth failure, not found
+        if any(keyword in error_lower for keyword in [
+            "invalid number", "not registered", "not on whatsapp",
+            "http 400", "http 401", "http 404",
+            "unauthorized", "auth", "permission",
+        ]):
+            return {"success": False, "error": error, "permanent": True}
+        # Unknown: treat as transient (safer to retry)
+        return {"success": False, "error": error, "permanent": False}
+
     def _post(self, endpoint: str, payload: dict, timeout: int = 30) -> dict[str, Any]:
         self._ensure_configured()
         url = "{0}/api/sessions/{1}/messages/{2}".format(
@@ -114,17 +137,17 @@ class OpenWAClient:
         try:
             r = requests.post(url, json=payload, headers=headers, timeout=timeout)
             if r.ok:
-                return {"success": True, "data": r.json() if r.content else {}}
+                return {"success": True, "data": r.json() if r.content else {}, "permanent": False}
             _log_error("OpenWA HTTP {0}".format(r.status_code),
                        "URL: {0}\nStatus: {1}\nResponse: {2}".format(url, r.status_code, r.text[:500]))
-            return {"success": False, "error": "HTTP {0}: {1}".format(r.status_code, r.text[:200])}
+            return self._classify_error("HTTP {0}: {1}".format(r.status_code, r.text[:200]))
         except requests.exceptions.ConnectionError:
-            return {"success": False, "error": "Cannot connect to OpenWA at {0}. Is it running?".format(self.base_url)}
+            return self._classify_error("Cannot connect to OpenWA at {0}. Is it running?".format(self.base_url))
         except requests.exceptions.Timeout:
-            return {"success": False, "error": "OpenWA timed out after {0}s".format(timeout)}
-        except Exception:
+            return self._classify_error("OpenWA timed out after {0}s".format(timeout))
+        except Exception as e:
             _log_error("OpenWA exception", frappe.get_traceback())
-            return {"success": False, "error": "Unexpected error — check Error Log."}
+            return self._classify_error("Unexpected error — check Error Log: {0}".format(e))
 
     def send_text(self, chat_id: str, text: str) -> dict:
         return self._post("send-text", {"chatId": chat_id, "text": text})
@@ -382,17 +405,22 @@ def _execute_whatsapp_send(job_args: dict) -> dict:
         elif action == "send_manual":
             result = _bg_send_manual(job_args)
         else:
-            result = {"success": False, "error": "Unknown action: {0}".format(action)}
+            result = {"success": False, "error": "Unknown action: {0}".format(action), "permanent": True}
 
         if result.get("success"):
             reset_circuit_breaker()
             _update_log(log_name, "Sent")
+        elif result.get("permanent"):
+            # Permanent failure (invalid number, not registered, etc.) — do NOT trip gateway breaker
+            _update_log(log_name, "Failed", result.get("error"))
         else:
+            # Transient failure (gateway down, timeout, 5xx) — trip gateway breaker
             increment_circuit_breaker()
             _update_log(log_name, "Failed", result.get("error"))
         return result
 
     except Exception as e:
+        # Unexpected exception — treat as transient, trip breaker
         increment_circuit_breaker()
         _update_log(log_name, "Failed", str(e))
         frappe.log_error(title="WhatsApp bg worker error", message=frappe.get_traceback())
