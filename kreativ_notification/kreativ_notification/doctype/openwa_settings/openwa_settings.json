@@ -18,6 +18,8 @@
     "auto_reply_enabled",
     "allowed_roles",
     "invoice_keywords",
+    "ledger_keywords",
+    "invoice_print_format",
     "section_break_session",
     "session_status",
     "session_qr",
@@ -115,6 +117,20 @@
       "fieldname": "invoice_keywords",
       "fieldtype": "Data",
       "label": "Invoice Keywords"
+    },
+    {
+      "default": "ledger,statement,account,balance,\u092c\u0939\u0940",
+      "description": "Comma-separated keywords that trigger customer ledger fetch (case-insensitive).",
+      "fieldname": "ledger_keywords",
+      "fieldtype": "Data",
+      "label": "Ledger Keywords"
+    },
+    {
+      "description": "Print format to use for Invoice PDF replies. Leave blank for default.",
+      "fieldname": "invoice_print_format",
+      "fieldtype": "Link",
+      "label": "Invoice Print Format",
+      "options": "Print Format"
     },
     {
       "fieldname": "section_break_session",

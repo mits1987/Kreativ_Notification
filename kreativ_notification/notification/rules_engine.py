@@ -13,7 +13,7 @@ from __future__ import annotations
 import base64
 
 import frappe
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, get_datetime, nowdate
 
 from kreativ_notification.notification.dispatcher import dispatch
 
@@ -24,6 +24,38 @@ EVENT_MAP = {
     "on_update": "Value Change",
     "on_update_after_submit": "Value Change",
 }
+
+def _get_shift_hours_for_out(employee: str, out_time) -> str:
+    """Worked hours string for an OUT punch (same logic as employee_notifications)."""
+    try:
+        ATTENDANCE_SHIFT_DOCTYPE = "KG Employee Attendance Shift"
+        if frappe.db.exists("DocType", ATTENDANCE_SHIFT_DOCTYPE):
+            worked = frappe.db.get_value(
+                ATTENDANCE_SHIFT_DOCTYPE,
+                {"employee": employee, "check_out": out_time},
+                "worked_hours",
+            )
+            if worked:
+                return worked
+
+        last_in = frappe.db.get_value(
+            "Employee Checkin",
+            filters={
+                "employee": employee,
+                "log_type": "IN",
+                "time": ["<", out_time],
+            },
+            fieldname="time",
+            order_by="time desc",
+        )
+        if last_in:
+            secs = (get_datetime(out_time) - get_datetime(last_in)).total_seconds()
+            if 0 < secs < 24 * 3600:
+                return f"{int(secs // 3600)}:{int((secs % 3600) // 60):02d}"
+    except Exception:
+        frappe.log_error(title="Shift hours lookup failed",
+                         message=frappe.get_traceback())
+    return ""
 
 SKIP_DOCTYPES = {
     # Never rule-match on our own machinery or high-churn system doctypes
@@ -108,6 +140,13 @@ def _process_rule(rule_name: str, doc, event: str, date_key: str = ""):
         return
 
     language = rule.get_recipient_language(doc)
+
+    # Compute shift_hours for Employee Checkin OUT punches (template expects doc.shift_hours)
+    if doc.doctype == "Employee Checkin" and doc.log_type == "OUT" and doc.employee:
+        doc.shift_hours = _get_shift_hours_for_out(doc.employee, doc.time)
+    else:
+        doc.shift_hours = ""
+
     rendered = template.render(doc, language)
 
     # Attachment (PDF) rendered once, shared by all recipients

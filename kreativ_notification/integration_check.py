@@ -33,10 +33,10 @@ test("import setup_defaults", lambda: hasattr(__import__("kreativ_notification.n
 
 # gravures_custom integration
 test("gravures_custom.log_whatsapp_send", lambda: hasattr(__import__("gravures_custom.overrides", fromlist=["log_whatsapp_send"]), "log_whatsapp_send"))
-test("gravures_custom.send_proofing_whatsapp", lambda: hasattr(__import__("gravures_custom.overrides", fromlist=["send_proofing_whatsapp"]), "send_proofing_whatsapp"))
+test("gravures_custom.send_proofing_whatsapp", lambda: hasattr(__import__("gravures_custom.overrides", fromlist=["send_proofing_whatsapp"]), "send_proofing_whatsap"))
 
 # Hook checks
-hooks = __import__("kreativ_notification.kreativ_notification.hooks", fromlist=["app_include_js", "scheduler_events"])
+hooks = __import__("kreativ_notification.hooks", fromlist=["app_include_js", "scheduler_events"])
 test("app_include_js set", lambda: bool(hooks.app_include_js))
 test("scheduler_events set", lambda: bool(hooks.scheduler_events))
 

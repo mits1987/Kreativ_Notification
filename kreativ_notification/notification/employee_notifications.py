@@ -118,7 +118,9 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
                             "whatsapp_sent", 1, update_modified=False)
         return
 
-    text = "{0} - {1} at {2}".format(
+    emoji = "🟢" if c.log_type == "IN" else "🔴"
+    text = "{0} {1} - {2} at {3}".format(
+        emoji,
         c.log_type,
         c.employee_name or c.employee,
         format_datetime(c.time, "dd-MM-yyyy HH:mm"),
@@ -153,7 +155,7 @@ def notify_checkin(checkin_name: str, test_mode: bool = False):
     result = dispatch(
         recipient=recipient,
         text=text,
-        message_type="Checkin",
+        message_type="Custom",
         source_doctype="Employee Checkin",
         source_docname=checkin_name,
         priority="Normal",
@@ -261,7 +263,7 @@ def send_salary_slip(salary_slip: str):
         file_b64=file_b64,
         filename=f"{salary_slip}.pdf",
         mimetype="application/pdf",
-        message_type="Salary Slip",
+        message_type="Custom",
         source_doctype="Salary Slip",
         source_docname=salary_slip,
         source_print_format=print_format or "",
