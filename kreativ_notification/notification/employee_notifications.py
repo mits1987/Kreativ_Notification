@@ -95,14 +95,22 @@ def _get_shift_hours_for_out(employee: str, out_time) -> str:
     return ""
 
 
-def notify_checkin(checkin_name: str, test_mode: bool = False):
-    """Background job: dispatch one WhatsApp message for a new punch."""
+def notify_checkin(checkin_name: str | frappe.model.document.Document, test_mode: bool = False):
+    """Background job: dispatch one WhatsApp message for a new punch.
+
+    Accepts either a checkin name (str) or a document object (from doc_events hook).
+    """
+    # Handle both string (name) and Document object passed by Frappe hooks
+    if hasattr(checkin_name, "name"):
+        checkin_name = checkin_name.name
+
     settings = frappe.get_cached_doc("OpenWA Settings")
     if not settings.enabled:
         return
 
     c = frappe.db.get_value(
-        "Employee Checkin", checkin_name,
+        "Employee Checkin",
+        {"name": checkin_name},
         ["employee", "employee_name", "log_type", "time", "whatsapp_sent"],
         as_dict=True,
     )
