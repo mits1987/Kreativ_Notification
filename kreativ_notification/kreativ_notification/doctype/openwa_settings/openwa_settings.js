@@ -58,7 +58,10 @@ frappe.ui.form.on('OpenWA Settings', {
 				callback: function(r) {
 					if (r.message && r.message.status === 'ok') {
 						frm.set_value('session_status', r.message.session_status);
-						frm.set_value('session_qr', '<div style="text-align:center;"><img src="' + r.message.qr + '" style="max-width:100%;height:auto;border:1px solid #ddd;border-radius:4px;padding:10px;background:#fff;" /></div>');
+						const qr_html = '<div style="text-align:center;"><img src="' + r.message.qr + '" style="max-width:100%;height:auto;border:1px solid #ddd;border-radius:4px;padding:10px;background:#fff;" /></div>';
+						if (frm.fields_dict.session_qr && frm.fields_dict.session_qr.$wrapper) {
+							frm.fields_dict.session_qr.$wrapper.html(qr_html);
+						}
 						frappe.show_alert({message: __('QR Code loaded. Scan with WhatsApp.'), indicator: 'blue'});
 					} else if (r.message) {
 						frappe.msgprint(r.message.message);
