@@ -215,7 +215,7 @@
   "links": [],
   "modified": "2026-07-19 16:27:18.317576",
   "modified_by": "Administrator",
-  "module": "Kreativ Notification",
+  "module": "kreativ_notification",
   "name": "OpenWA Settings",
   "owner": "Administrator",
   "permissions": [

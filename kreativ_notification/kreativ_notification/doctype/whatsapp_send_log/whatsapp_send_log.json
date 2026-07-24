@@ -30,6 +30,7 @@
     "fallback_channel",
     "fallback_deadline",
     "fallback_fired",
+    "delivery_synced",
     "section_error",
     "error_message",
     "meta"
@@ -170,6 +171,13 @@
       "fieldname": "fallback_fired",
       "fieldtype": "Check",
       "label": "Fallback Fired",
+      "read_only": 1
+    },
+    {
+      "default": "0",
+      "fieldname": "delivery_synced",
+      "fieldtype": "Check",
+      "label": "Delivery Synced",
       "read_only": 1
     },
     {

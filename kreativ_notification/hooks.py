@@ -77,6 +77,10 @@ scheduler_events = {
         "*/5 * * * *": [
             "kreativ_notification.notification.dispatcher.sync_delivery_status",
         ],
+        # Inbound webhook health check - verify OpenWA gateway is reachable
+        "0 * * * *": [
+            "kreativ_notification.notification.inbound.check_inbound_webhook_health",
+        ],
     },
     "daily": [
         # Days Before / Days After rules (payment reminders etc.)
