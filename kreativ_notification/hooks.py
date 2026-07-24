@@ -61,6 +61,10 @@ scheduler_events = {
             "kreativ_notification.notification.dispatcher.process_fallbacks",
             "kreativ_notification.kreativ_notification.doctype.notification_channel.notification_channel.check_all_channels",
         ],
+        # Auto-refresh OpenWA session status (updates session_status field in OpenWA Settings)
+        "*/10 * * * *": [
+            "kreativ_notification.kreativ_notification.doctype.openwa_settings.openwa_settings.auto_refresh_session_status",
+        ],
         # NEW — moved here from kreativ_attendance/hooks.py. Safety net for
         # checkin notifications whose original enqueue was lost. Transport
         # retries are handled by the dispatcher; this only re-feeds punches

@@ -137,3 +137,34 @@ def test_webhook_config():
 		return {"status": "error", "message": "Circuit breaker is tripped - outbound messages blocked"}
 
 	return {"status": "ok", "message": "Webhook configuration looks good"}
+
+
+def auto_refresh_session_status():
+	"""Scheduled job: auto-refresh session status in OpenWA Settings (runs every 10 min)."""
+	try:
+		from kreativ_notification.notification.openwa_client import get_openwa_config
+		import requests
+
+		base_url, api_key, session_id = get_openwa_config()
+		if not base_url or not api_key:
+			return
+
+		r = requests.get(f"{base_url}/api/sessions/{session_id}",
+						 headers={"X-API-Key": api_key}, timeout=10)
+		if r.status_code != 200:
+			return
+
+		data = r.json()
+		status = data.get("status", "unknown")
+		phone = data.get("phone")
+		pushname = data.get("pushname")
+
+		# Update the Single DocType directly
+		frappe.db.set_value("OpenWA Settings", "OpenWA Settings", {
+			"session_status": status,
+			"session_phone": phone or "",
+			"session_pushname": pushname or "",
+		}, update_modified=False)
+		frappe.db.commit()
+	except Exception:
+		frappe.log_error(title="Auto-refresh session status failed", message=frappe.get_traceback())
