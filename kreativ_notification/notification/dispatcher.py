@@ -414,6 +414,41 @@ def record_delivery_status(provider_message_id: str, status: str):
         frappe.db.commit()
 
 
+def sync_delivery_status():
+    """Cron (every 5 min): sync Delivered/Read status back to Employee Checkin.
+
+    Only runs for WhatsApp - OpenWA channel, Employee Checkin source.
+    """
+    try:
+        sent_logs = frappe.get_all(LOG_DOCTYPE,
+            filters={
+                "status": ["in", ["Sent", "Delivered", "Read"]],
+                "source_doctype": "Employee Checkin",
+                "channel": "Primary WhatsApp",
+                "delivery_synced": 0
+            },
+            fields=["name", "source_docname", "status"])
+    except Exception:
+        # If delivery_synced field doesn't exist yet, skip silently
+        return
+
+    for log in sent_logs:
+        try:
+            # Map status to checkin value: 0=Queued, 1=Queued, 2=Delivered, 3=Failed
+            if log["status"] in ("Sent", "Delivered", "Read"):
+                frappe.db.set_value("Employee Checkin", log["source_docname"],
+                                    "whatsapp_sent", 2, update_modified=False)
+            frappe.db.set_value(LOG_DOCTYPE, log["name"],
+                                "delivery_synced", 1, update_modified=False)
+        except Exception:
+            frappe.log_error(
+                title=f"Delivery sync failed for {log['name']}",
+                message=frappe.get_traceback())
+
+    if sent_logs:
+        frappe.db.commit()
+
+
 # ---------------------------------------------------------------------------
 # Quiet hours / rate limit / circuit breaker helpers
 # ---------------------------------------------------------------------------

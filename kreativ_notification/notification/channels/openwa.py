@@ -90,23 +90,56 @@ class OpenWADriver(BaseChannelDriver):
             # Contract: never raise for delivery failures.
             return SendResult.fail(f"OpenWA driver error: {e}")
 
+    def _send_with_contact_check(self, method: str, recipient: str, *args, **kwargs) -> SendResult:
+        """Send with optional contact verification on HTTP 500 failure."""
+        client = self._client()
+        if isinstance(client, SendResult):
+            return client
+        try:
+            return self._to_result(getattr(client, method)(recipient, *args, **kwargs))
+        except Exception as e:
+            return SendResult.fail(f"OpenWA driver error: {e}")
+
+    def _verify_and_retry(self, method: str, recipient: str, *args, **kwargs) -> SendResult:
+        """Primary send; on HTTP 500, check if contact exists on WhatsApp."""
+        client = self._client()
+        if isinstance(client, SendResult):
+            return client
+
+        # First attempt
+        result = self._to_result(getattr(client, method)(recipient, *args, **kwargs))
+
+        # If HTTP 500 from send-text/send-document, treat as permanent failure
+        # OpenWA returns generic "Internal server error" for "No LID for user"
+        # which means the number is not on WhatsApp. The check_contact via
+        # profile-picture endpoint returns 200 for all contacts so it's unreliable.
+        if not result.get("success") and "HTTP 500" in str(result.get("error", "")):
+            if method in ("send_text", "send_document", "send_image"):
+                # Treat HTTP 500 on message sends as permanent (non-WhatsApp number)
+                return SendResult.fail(
+                    f"Contact not on WhatsApp or OpenWA error: {recipient}",
+                    raw=result.get("raw"),
+                    permanent=True,
+                )
+        return result
+
     # ------------------------------------------------------------------
     # Sending
     # ------------------------------------------------------------------
 
     def send_text(self, recipient: str, text: str, **kwargs) -> SendResult:
-        return self._send("send_text", recipient, text)
+        return self._verify_and_retry("send_text", recipient, text)
 
     def send_document(self, recipient: str, file_b64: str, filename: str,
                       mimetype: str = "application/pdf", caption: str = "",
                       **kwargs) -> SendResult:
-        return self._send("send_document", recipient, file_b64, filename,
-                          mimetype=mimetype, caption=caption)
+        return self._verify_and_retry("send_document", recipient, file_b64, filename,
+                                      mimetype=mimetype, caption=caption)
 
     def send_image(self, recipient: str, image_b64: str, filename: str,
                    caption: str = "", **kwargs) -> SendResult:
-        return self._send("send_image", recipient, image_b64, filename,
-                          caption=caption)
+        return self._verify_and_retry("send_image", recipient, image_b64, filename,
+                                      caption=caption)
 
     # ------------------------------------------------------------------
     # Recipient normalisation: mobile number -> chat_id

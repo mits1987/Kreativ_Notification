@@ -69,6 +69,10 @@ scheduler_events = {
         "*/10 * * * *": [
             "kreativ_notification.notification.employee_notifications.retry_missed_notifications",
         ],
+        # Sync Delivered/Read status back to Employee Checkin whatsapp_sent field
+        "*/5 * * * *": [
+            "kreativ_notification.notification.dispatcher.sync_delivery_status",
+        ],
     },
     "daily": [
         # Days Before / Days After rules (payment reminders etc.)

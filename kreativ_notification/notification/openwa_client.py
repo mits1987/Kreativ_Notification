@@ -112,12 +112,17 @@ class OpenWAClient:
         Returns dict with keys: success (bool), error (str), permanent (bool).
         """
         error_lower = error.lower()
+        # Permanent: contact not on WhatsApp (OpenWA "No LID for user" -> HTTP 500)
+        if "no lid for user" in error_lower:
+            return {"success": False, "error": error, "permanent": True}
+
         # Transient: gateway down, timeout, 5xx server errors
         if any(keyword in error_lower for keyword in [
             "cannot connect", "connection", "timeout", "timed out",
             "http 500", "http 502", "http 503", "http 504",
         ]):
             return {"success": False, "error": error, "permanent": False}
+
         # Permanent: invalid number, not registered, auth failure, not found
         if any(keyword in error_lower for keyword in [
             "invalid number", "not registered", "not on whatsapp",
@@ -125,6 +130,7 @@ class OpenWAClient:
             "unauthorized", "auth", "permission",
         ]):
             return {"success": False, "error": error, "permanent": True}
+
         # Unknown: treat as transient (safer to retry)
         return {"success": False, "error": error, "permanent": False}
 
@@ -290,6 +296,32 @@ class OpenWAClient:
             return {"status": "error", "message": "HTTP {0}: {1}".format(r.status_code, r.text[:200])}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    def check_contact(self, chat_id: str) -> dict:
+        """Check if a contact exists on WhatsApp via OpenWA.
+
+        Returns: {"success": bool, "exists": bool, "error": str|None}
+        """
+        self._ensure_configured()
+        # OpenWA contacts endpoint returns all contacts - we can filter
+        # For a more direct check, use the /contacts/{id}/profile-picture endpoint
+        # which returns 404 if contact doesn't exist on WhatsApp
+        url = "{0}/api/sessions/{1}/contacts/{2}/profile-picture".format(
+            self.base_url, self.session_id, chat_id)
+        try:
+            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            if r.status_code == 404:
+                return {"success": True, "exists": False, "error": None}
+            if r.ok:
+                return {"success": True, "exists": True, "error": None}
+            return self._classify_error("HTTP {0}: {1}".format(r.status_code, r.text[:200]))
+        except requests.exceptions.ConnectionError:
+            return self._classify_error("Cannot connect to OpenWA at {0}. Is it running?".format(self.base_url))
+        except requests.exceptions.Timeout:
+            return self._classify_error("OpenWA timed out after 10s")
+        except Exception as e:
+            _log_error("OpenWA exception", frappe.get_traceback())
+            return self._classify_error("Unexpected error — check Error Log: {0}".format(e))
 
     def start_session(self) -> dict:
         self._ensure_configured()
