@@ -7,18 +7,26 @@ Circuit Breaker (per-site):
     a down OpenWA instance. Reset on first success.
 
 Auto-Recovery:
-    1. Session 404 (lost/deleted) -> Auto-creates a new session on OpenWA,
-       updates Frappe settings, starts the session, and logs a prominent
-       error: "QR SCAN NEEDED" for admin to re-link WhatsApp.
+    1. Session 404 (lost/deleted) -> After 3 consecutive 404s (~15 min),
+       auto-creates a new session on OpenWA, updates Frappe settings,
+       and logs a prominent error: "QR SCAN NEEDED" for admin to re-link WhatsApp.
     2. Session "created"/"disconnected" -> Auto-starts via POST /start
        (works when multi-device credentials still exist on disk).
-    3. Session stale (lastActive > 60 min) -> Stop/start cycle via API.
+    3. Session stale (lastActive > 240 min / 4 hours) -> Stop/start cycle via API.
+       (Idle WhatsApp accounts are normal overnight/weekends; 4h threshold
+       avoids unnecessary reconnect churn that drops pairings.)
     4. Session "ready"/"connected" -> Healthy, reset breaker.
 
 Per-Site Isolation:
     Each site (kreativ216, kreativ316) has its own OpenWA session
     and circuit breaker state. One site's session going down no longer
     affects the other.
+
+Multi-Site Guard:
+    If both sites share same base_url AND session_id == "default",
+    health check refuses to act (logs ERROR, returns guarded state).
+    This prevents one site's health check from stopping/starting/recreating
+    the other site's session. Admin MUST configure unique session_id per site.
 
 Gateway Safety:
     Auto-restart of the gateway process is DISABLED in health checks to
@@ -43,6 +51,10 @@ from kreativ_notification.notification.openwa_client import (
 
 MAX_BACKOFF_MINUTES = 60
 MAX_BREAKER_DURATION_MINUTES = 60
+# Number of consecutive 404s before auto-creating new session
+CONSECUTIVE_404_THRESHOLD = 3
+# Stale threshold: 4 hours (was 60 min - too aggressive for idle accounts)
+STALE_THRESHOLD_MINUTES = 240
 
 
 def _is_breaker_tripped() -> bool:
@@ -99,6 +111,50 @@ def _can_attempt_probe() -> bool:
     return False
 
 
+def _get_consecutive_404s() -> int:
+    """Track consecutive 404s for this site's session."""
+    return int(frappe.cache().get_value(_breaker_key("404_streak")) or 0)
+
+
+def _increment_404_streak() -> int:
+    streak = _get_consecutive_404s() + 1
+    frappe.cache().set_value(_breaker_key("404_streak"), streak, expires_in_sec=86400)
+    return streak
+
+
+def _reset_404_streak() -> None:
+    frappe.cache().delete_value(_breaker_key("404_streak"))
+
+
+def _check_multi_site_collision(settings) -> bool:
+    """Guard: if session_id is 'default' and base_url same as other sites, refuse action.
+
+    Returns True if collision detected (should skip auto-recovery).
+    """
+    session_id = settings.session_id or "default"
+    if session_id != "default":
+        return False
+
+    # Check if other sites exist with same base_url
+    other_sites = frappe.get_all("OpenWA Settings",
+        filters={"base_url": settings.base_url, "enabled": 1},
+        pluck="name"
+    )
+    if len(other_sites) > 1:
+        frappe.log_error(
+            title="OpenWA Multi-Site Collision Detected",
+            message=(
+                f"Site {frappe.local.site}: session_id is 'default' but other sites "
+                f"share base_url ({settings.base_url}). "
+                f"Sites: {', '.join(other_sites)}. "
+                f"Auto-recovery SKIPPED to prevent cross-site session stomping. "
+                f"Configure unique session_id per site in OpenWA Settings."
+            ),
+        )
+        return True
+    return False
+
+
 def _session_is_stale(settings, data: dict) -> bool:
     last_active = data.get("lastActive")
     if not last_active:
@@ -107,7 +163,7 @@ def _session_is_stale(settings, data: dict) -> bool:
     last_dt = get_datetime(last_active)
     age_minutes = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
 
-    if age_minutes > 60:
+    if age_minutes > STALE_THRESHOLD_MINUTES:
         frappe.cache().set_value(_breaker_key("stale"), True, expires_in_sec=7200)
         return True
 
@@ -171,7 +227,6 @@ def _retry_unsent():
 def check_openwa_session():
     """
     Scheduled job: runs every 5 minutes to verify OpenWA session is healthy.
-    If session is disconnected, restarts the OpenWA service via supervisor.
 
     Circuit Breaker: Tracks consecutive failures. After 3 failures, trips
     and enters exponential backoff (5min, 10min, 20min...) to avoid
@@ -195,6 +250,7 @@ def check_openwa_session():
         settings = frappe.get_cached_doc("OpenWA Settings")
         if not settings.enabled:
             _reset_failure_streak()
+            _reset_404_streak()
             return {"status": "skipped", "reason": "OpenWA not enabled"}
 
         base_url = settings.base_url.rstrip("/") if settings.base_url else ""
@@ -203,6 +259,7 @@ def check_openwa_session():
 
         if not base_url or not api_key:
             _increment_failure_streak()
+            _reset_404_streak()
             return {"status": "error", "reason": "Missing base_url or api_key in settings"}
 
         # 1. Check HTTP endpoint
@@ -210,6 +267,7 @@ def check_openwa_session():
             r = requests.get(f"{base_url}/", timeout=10)
             if r.status_code != 200:
                 _increment_failure_streak()
+                _reset_404_streak()
                 frappe.log_error(
                     title="OpenWA Health Check Failed",
                     message=f"HTTP {r.status_code} from {base_url}. Gateway may be down — restart manually if persistent.",
@@ -217,6 +275,7 @@ def check_openwa_session():
                 return {"status": "error", "reason": f"HTTP {r.status_code}"}
         except Exception as e:
             _increment_failure_streak()
+            _reset_404_streak()
             frappe.log_error(
                 title="OpenWA Health Check Failed",
                 message=f"HTTP check failed: {e}. Gateway may be down — restart manually if persistent.",
@@ -231,17 +290,35 @@ def check_openwa_session():
                 timeout=10
             )
 
-            # --- Session not found on server (404) — auto-create a new one ---
+            # --- Session not found on server (404) ---
             if r.status_code == 404:
+                # Increment consecutive 404 counter
+                streak = _increment_404_streak()
+
+                if streak < CONSECUTIVE_404_THRESHOLD:
+                    frappe.logger().info(
+                        f"OpenWA session {session_id} 404 (streak: {streak}/{CONSECUTIVE_404_THRESHOLD}). "
+                        f"Waiting for {CONSECUTIVE_404_THRESHOLD - streak} more consecutive 404s before auto-create."
+                    )
+                    return {"status": "404_counting", "streak": streak, "threshold": CONSECUTIVE_404_THRESHOLD, "checked": now()}
+
+                # Threshold reached - attempt auto-create with multi-site guard
                 site_name = frappe.local.site or "default"
                 frappe.log_error(
-                    title="OpenWA Session Lost — Auto-Creating",
+                    title="OpenWA Session Lost — Auto-Creating After Threshold",
                     message=(
-                        f"Session {session_id} was not found on OpenWA server (404). "
+                        f"Session {session_id} not found on OpenWA server after "
+                        f"{CONSECUTIVE_404_THRESHOLD} consecutive 404s (~15 min). "
                         f"Attempting to create a new session for site {site_name}. "
-                        "QR scan will be needed to re-link WhatsApp."
+                        f"QR scan will be needed to re-link WhatsApp."
                     ),
                 )
+
+                # Multi-site collision guard
+                if _check_multi_site_collision(settings):
+                    _reset_404_streak()
+                    return {"status": "guarded", "reason": "Multi-site collision - manual intervention required", "checked": now()}
+
                 try:
                     create_r = requests.post(
                         f"{base_url}/api/sessions",
@@ -269,7 +346,10 @@ def check_openwa_session():
                                     f"Until scanned, the session will stay in disconnected state."
                                 ),
                             )
-                            _increment_failure_streak()
+                            # Reset 404 streak on successful creation
+                            _reset_404_streak()
+                            # Reset failure streak - this is a successful recovery action
+                            _reset_failure_streak()
                             return {"status": "qr_needed", "new_session_id": new_id, "checked": now()}
                     else:
                         frappe.log_error(
@@ -281,8 +361,10 @@ def check_openwa_session():
                         title="OpenWA Session Creation Error",
                         message=f"Exception creating session: {create_e}",
                     )
-                _increment_failure_streak()
                 return {"status": "error", "reason": "Session lost and re-creation failed"}
+
+            # Success - reset 404 streak
+            _reset_404_streak()
 
             if r.status_code != 200:
                 _increment_failure_streak()
@@ -306,7 +388,8 @@ def check_openwa_session():
                     if start_r.status_code in (200, 201):
                         start_data = start_r.json()
                         new_status = start_data.get("status", "")
-                        _increment_failure_streak()
+                        # SUCCESS: reset failure streak (not increment!)
+                        _reset_failure_streak()
                         frappe.logger().info(
                             f"OpenWA session restarted: {status} -> {new_status}. "
                             f"If {new_status} != 'connected', QR scan may be needed."
@@ -324,7 +407,8 @@ def check_openwa_session():
                     frappe.log_error(title="OpenWA Session Start Error", message=str(start_e))
                     return {"status": "error", "reason": f"Start error: {start_e}"}
 
-            if status not in ["ready", "connected"]:
+            healthy_statuses = ["ready", "connected", "qr_ready"]
+            if status not in healthy_statuses:
                 _increment_failure_streak()
                 frappe.log_error(
                     title="OpenWA Session Unhealthy",
@@ -332,8 +416,12 @@ def check_openwa_session():
                 )
                 return {"status": "error", "reason": f"Session status: {status}"}
 
-            # Check for stale session (lastActive > 60 min ago)
+            # Check for stale session (lastActive > STALE_THRESHOLD_MINUTES ago)
             if _session_is_stale(settings, data):
+                # Multi-site collision guard before stop/start
+                if _check_multi_site_collision(settings):
+                    return {"status": "guarded", "reason": "Multi-site collision - stale recovery skipped", "checked": now()}
+
                 # Auto-recover: stop/start session to re-establish WebSocket
                 result = _restart_session(settings)
                 if result.get("status") == "recovered":
@@ -365,6 +453,7 @@ def check_openwa_session():
 
         except Exception as e:
             _increment_failure_streak()
+            _reset_404_streak()
             frappe.log_error(
                 title="OpenWA Health Check Failed",
                 message=f"Session check failed: {e}. Restart manually if persistent.",

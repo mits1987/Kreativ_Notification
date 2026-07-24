@@ -149,98 +149,39 @@ def _strip_action_banner(html: str) -> str:
     return str(soup)
 
 
-def screenshot_html(html: str, width: int = 1200, height: int = 800) -> bytes:
-    """Render HTML to screenshot via headless Chromium."""
-    import subprocess
-    import tempfile
-    import os
-
-    # Clean HTML for screenshot
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
-    for banner in soup.find_all("div", class_="action-banner"):
-        banner.decompose()
-    clean_html = str(soup)
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
-        f.write(clean_html)
-        html_path = f.name
-
-    png_path = html_path.replace(".html", ".png")
-    try:
-        result = subprocess.run(
-            [
-                "chromium-browser",
-                "--headless=new",
-                "--no-sandbox",
-                "--disable-gpu",
-                f"--window-size={width},{height}",
-                f"--screenshot={png_path}",
-                f"file://{html_path}",
-            ],
-            timeout=30,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            raise Exception(f"Chromium failed: {result.stderr.decode()}")
-
-        with open(png_path, "rb") as f:
-            return f.read()
-    finally:
-        for p in (html_path, png_path):
-            try:
-                os.unlink(p)
-            except Exception:
-                pass
-
-
-def _chrome_path() -> str:
-    """Return path to Chrome/Chromium binary.
-
-    Order: 1) `chrome_path` in site_config.json / common_site_config.json
-           2) known binary names on PATH
-    Config-first means the server-specific path lives in config, not code.
-    """
-    import shutil
-    configured = frappe.conf.get("chrome_path")
-    if configured and os.path.exists(configured):
-        return configured
-    for binary in ("chromium", "chromium-browser", "google-chrome",
-                   "google-chrome-stable", "chrome", "headless_shell"):
-        path = shutil.which(binary)
-        if path:
-            return path
-    frappe.throw(
-        "No Chromium binary found. Set 'chrome_path' in site_config.json, "
-        'e.g. "chrome_path": "/home/mitesh/frappe-bench-v16/chromium/chrome-linux/headless_shell"'
-    )
-
-
-def screenshot_html(html_content: str, width: int = 1000) -> bytes:
+def screenshot_html(html_content: str, width: int = 1000, max_height: int = 8000) -> bytes:
     """Render HTML to full-page PNG via Chromium headless, return raw PNG bytes.
 
     Fixes:
-    - Full page capture: uses large window height (20000px) so Chromium renders all content
-    - Smart crop: detects background color from corner pixels instead of assuming white
-    - Portable Chrome path: uses shutil.which()
+    - Caps max_height at 8000px (was 20000px causing OOM)
+    - Removed --force-device-scale-factor=2 (was 2x memory)
+    - Reuses _chrome_path() for portable binary detection
     """
     from PIL import Image, ImageChops
     import io
 
+    # Clean HTML for screenshot
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html_content, "html.parser")
+    for banner in soup.find_all("div", class_="action-banner"):
+        banner.decompose()
+    clean_html = str(soup)
+
     with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
-        f.write(html_content)
+        f.write(clean_html)
         html_path = f.name
     fd, png_path = tempfile.mkstemp(suffix='.png')
     os.close(fd)
 
     try:
-        # Large height (20000) forces Chromium to render full document
-        # --hide-scrollbars prevents scrollbar artifacts
-        cmd = [_chrome_path(), '--headless', '--no-sandbox', '--disable-gpu',
-               '--force-device-scale-factor=2',
-               '--hide-scrollbars',
-               '--window-size={0},20000'.format(width),
-               '--screenshot=' + png_path, html_path]
+        # Cap height at 8000px max to prevent OOM (was 20000)
+        # Removed --force-device-scale-factor=2 to halve memory usage
+        cmd = [
+            _chrome_path(), '--headless', '--no-sandbox', '--disable-gpu',
+            '--hide-scrollbars',
+            f'--window-size={width},{min(max_height, 8000)}',
+            '--screenshot=' + png_path, html_path
+        ]
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
         img = Image.open(png_path)
 

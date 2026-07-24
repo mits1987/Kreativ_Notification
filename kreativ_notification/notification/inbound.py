@@ -442,6 +442,7 @@ def _get_employee_user_id(phone_number: str) -> str | None:
 
     Normalizes phone from '91xxxxxxxxxx@c.us' format and matches
     against Employee.cell_number (last 10 digits).
+    Also validates employee has a role in allowed_roles (if configured).
     """
     # Normalize phone: "91xxxxxxxxxx@c.us" -> "91xxxxxxxxxx"
     clean_phone = phone_number
@@ -457,9 +458,25 @@ def _get_employee_user_id(phone_number: str) -> str | None:
         fields=["name", "user_id"],
         limit=1,
     )
-    if employees and employees[0].get("user_id"):
-        return employees[0]["user_id"]
-    return None
+    if not employees or not employees[0].get("user_id"):
+        return None
+
+    # Check allowed_roles from OpenWA Settings
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    allowed_roles_raw = settings.allowed_roles or ""
+    allowed_roles = [r.strip() for r in allowed_roles_raw.split(",") if r.strip()]
+
+    if allowed_roles:
+        employee_user_id = employees[0]["user_id"]
+        user_roles = frappe.get_roles(employee_user_id)
+        if not any(role in user_roles for role in allowed_roles):
+            frappe.logger().info(
+                f"WhatsApp message from employee {employee_user_id} rejected: "
+                f"roles {user_roles} not in allowed_roles {allowed_roles}"
+            )
+            return None
+
+    return employees[0]["user_id"]
 
 
 def _extract_message_text(message) -> str:

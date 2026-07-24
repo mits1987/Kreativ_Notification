@@ -12,6 +12,31 @@ import base64
 from typing import Any, Dict, List
 
 # ---------------------------------------------------------------------------
+# Connection Pool — shared requests.Session with HTTPAdapter
+# ---------------------------------------------------------------------------
+
+# Module-level session with connection pooling
+_requests_session = None
+
+
+def _get_session() -> requests.Session:
+    """Get or create a pooled requests session."""
+    global _requests_session
+    if _requests_session is None:
+        _requests_session = requests.Session()
+        # Configure connection pooling via HTTPAdapter
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=20,
+            max_retries=0,  # We handle retries at application level
+            pool_block=False,
+        )
+        _requests_session.mount("http://", adapter)
+        _requests_session.mount("https://", adapter)
+    return _requests_session
+
+
+# ---------------------------------------------------------------------------
 # Circuit Breaker — single source of truth
 # ---------------------------------------------------------------------------
 
@@ -140,8 +165,9 @@ class OpenWAClient:
             self.base_url, self.session_id, endpoint,
         )
         headers = {"X-API-Key": self.api_key}
+        session = _get_session()
         try:
-            r = requests.post(url, json=payload, headers=headers, timeout=timeout)
+            r = session.post(url, json=payload, headers=headers, timeout=timeout)
             if r.ok:
                 return {"success": True, "data": r.json() if r.content else {}, "permanent": False}
             _log_error("OpenWA HTTP {0}".format(r.status_code),
@@ -175,8 +201,9 @@ class OpenWAClient:
     def get_contacts(self, limit: int = 200) -> list:
         self._ensure_configured()
         url = "{0}/api/sessions/{1}/contacts?limit={2}".format(self.base_url, self.session_id, limit)
+        session = _get_session()
         try:
-            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=15)
+            r = session.get(url, headers={"X-API-Key": self.api_key}, timeout=15)
             if r.ok:
                 return r.json() if isinstance(r.json(), list) else []
         except Exception:
@@ -198,8 +225,9 @@ class OpenWAClient:
             return cached
 
         url = "{0}/api/sessions/{1}/chats".format(self.base_url.rstrip("/"), self.session_id)
+        session = _get_session()
         try:
-            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=15)
+            r = session.get(url, headers={"X-API-Key": self.api_key}, timeout=15)
             if r.ok:
                 chats = r.json() if isinstance(r.json(), list) else []
                 seen = set()
@@ -252,8 +280,9 @@ class OpenWAClient:
     def get_session_status(self) -> dict:
         self._ensure_configured()
         url = "{0}/api/sessions/{1}".format(self.base_url, self.session_id)
+        session = _get_session()
         try:
-            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            r = session.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
             if r.status_code == 404:
                 return {"status": "not_found", "message": "Session not found on OpenWA."}
             if r.ok:
@@ -273,8 +302,9 @@ class OpenWAClient:
         """GET /api/sessions/{id}/status -> {"status": ..., ...} (never throws)."""
         self._ensure_configured()
         url = "{0}/api/sessions/{1}/status".format(self.base_url, self.session_id)
+        session = _get_session()
         try:
-            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            r = session.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
             if r.status_code == 404:
                 return {"status": "not_found"}
             if r.ok:
@@ -287,8 +317,9 @@ class OpenWAClient:
     def get_session_qr(self) -> dict:
         self._ensure_configured()
         url = "{0}/api/sessions/{1}/qr".format(self.base_url, self.session_id)
+        session = _get_session()
         try:
-            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            r = session.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
             if r.ok:
                 data = r.json()
                 return {"status": "ok", "qr": data.get("qrCode", ""),
@@ -308,8 +339,9 @@ class OpenWAClient:
         # which returns 404 if contact doesn't exist on WhatsApp
         url = "{0}/api/sessions/{1}/contacts/{2}/profile-picture".format(
             self.base_url, self.session_id, chat_id)
+        session = _get_session()
         try:
-            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            r = session.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
             if r.status_code == 404:
                 return {"success": True, "exists": False, "error": None}
             if r.ok:
@@ -326,8 +358,9 @@ class OpenWAClient:
     def start_session(self) -> dict:
         self._ensure_configured()
         url = "{0}/api/sessions/{1}/start".format(self.base_url, self.session_id)
+        session = _get_session()
         try:
-            r = requests.post(url, headers={"X-API-Key": self.api_key}, timeout=15)
+            r = session.post(url, headers={"X-API-Key": self.api_key}, timeout=15)
             if r.ok:
                 return {"status": "ok", "message": "Session start requested."}
             return {"status": "error", "message": "HTTP {0}".format(r.status_code)}
@@ -337,8 +370,9 @@ class OpenWAClient:
     def stop_session(self) -> dict:
         self._ensure_configured()
         url = "{0}/api/sessions/{1}/stop".format(self.base_url, self.session_id)
+        session = _get_session()
         try:
-            r = requests.post(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            r = session.post(url, headers={"X-API-Key": self.api_key}, timeout=10)
             if r.ok:
                 return {"status": "ok", "message": "Session stopped."}
             return {"status": "error", "message": "HTTP {0}".format(r.status_code)}
@@ -349,8 +383,9 @@ class OpenWAClient:
         self._ensure_configured()
         name = name or frappe.local.site or "default"
         url = "{0}/api/sessions".format(self.base_url)
+        session = _get_session()
         try:
-            r = requests.post(url,
+            r = session.post(url,
                               headers={"Content-Type": "application/json", "X-API-Key": self.api_key},
                               json={"name": name}, timeout=15)
             if r.status_code != 201:
@@ -372,8 +407,9 @@ class OpenWAClient:
             return None
         url = "{0}/api/sessions/{1}/contacts/{2}/profile-picture".format(
             self.base_url, self.session_id, contact_id)
+        session = _get_session()
         try:
-            r = requests.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            r = session.get(url, headers={"X-API-Key": self.api_key}, timeout=10)
             if r.ok:
                 return r.json().get("url")
         except Exception:

@@ -45,6 +45,13 @@ doc_events = {
         "on_update": "kreativ_notification.notification.rules_engine.clear_rule_cache",
         "on_trash": "kreativ_notification.notification.rules_engine.clear_rule_cache",
     },
+    "Employee Checkin": {
+        "after_insert": "kreativ_notification.notification.employee_notifications.notify_checkin",
+        "on_update": "kreativ_notification.notification.employee_notifications.notify_checkin",
+    },
+    "Salary Slip": {
+        "on_submit": "kreativ_notification.notification.employee_notifications.send_salary_slip",
+    },
 }
 
 # ---------------------------------------------------------------------------

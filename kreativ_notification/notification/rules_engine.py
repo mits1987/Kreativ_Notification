@@ -62,6 +62,7 @@ SKIP_DOCTYPES = {
     "WhatsApp Send Log", "Notification Channel", "Notification Rule",
     "Message Template", "Version", "Comment", "Error Log", "Activity Log",
     "Scheduled Job Log", "Email Queue", "Route History", "View Log",
+    "Notification Queue",
 }
 
 

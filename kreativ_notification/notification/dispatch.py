@@ -1,5 +1,6 @@
 """Dispatch helpers for WhatsApp."""
 import frappe
+import base64
 from frappe.utils import get_url
 
 from kreativ_notification.notification.openwa_client import get_openwa_config

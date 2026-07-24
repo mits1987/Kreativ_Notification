@@ -40,6 +40,11 @@ from frappe import _
 from frappe.utils import add_to_date, cint, get_time, now_datetime, nowtime
 
 from kreativ_notification.notification.channels import get_default_channel, get_driver
+from kreativ_notification.notification.openwa_client import (
+    check_circuit_breaker,
+    increment_circuit_breaker,
+    reset_circuit_breaker,
+)
 
 LOG_DOCTYPE = "WhatsApp Send Log"  # kept for continuity; now channel-aware
 
@@ -178,7 +183,7 @@ def deliver(log_name: str):
     channel = row["channel"]
 
     # ---- Circuit breaker (transport-level only) --------------------------
-    if _breaker_open(channel):
+    if check_circuit_breaker():
         _reschedule(log_name, row["retry_count"],
                     error="Circuit breaker open — channel failing", count_attempt=False)
         return
@@ -243,7 +248,7 @@ def deliver(log_name: str):
 
     # ---- Record ----------------------------------------------------------
     if result.get("success"):
-        _breaker_reset(channel)
+        reset_circuit_breaker()
         frappe.db.set_value(LOG_DOCTYPE, log_name, {
             "status": "Sent",
             "provider_message_id": result.get("message_id") or "",
@@ -257,7 +262,7 @@ def deliver(log_name: str):
             # Bad number, unconfigured channel etc. — do NOT open breaker
             _finalize(log_name, False, result.get("error"), permanent=True)
         else:
-            _breaker_trip(channel)
+            increment_circuit_breaker()
             _reschedule(log_name, row["retry_count"], error=result.get("error"))
 
 
@@ -497,19 +502,5 @@ def _rate_limit_ok(channel: str) -> bool:
         return True
 
 
-def _breaker_cache_key(channel: str) -> str:
-    return f"notif_breaker:{frappe.local.site}:{channel}"
-
-
-def _breaker_open(channel: str) -> bool:
-    return cint(frappe.cache().get_value(_breaker_cache_key(channel)) or 0) >= CIRCUIT_THRESHOLD
-
-
-def _breaker_trip(channel: str):
-    key = _breaker_cache_key(channel)
-    streak = cint(frappe.cache().get_value(key) or 0) + 1
-    frappe.cache().set_value(key, streak, expires_in_sec=1800)  # auto-heal in 30 min
-
-
-def _breaker_reset(channel: str):
-    frappe.cache().delete_value(_breaker_cache_key(channel))
+# Removed: _breaker_cache_key, _breaker_open, _breaker_trip, _breaker_reset
+# Now using kreativ_notification.notification.openwa_client circuit breaker
