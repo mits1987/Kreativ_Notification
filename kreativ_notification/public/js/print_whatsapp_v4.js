@@ -530,9 +530,19 @@
 
 
 function hasWhatsAppPermission() {
-        // Check if user is Engraving User - hide button only for Engraving User
+        // Show button if user has ANY of these roles (allowlist approach)
+        var allowed_roles = [
+            "System Manager", "Sales Manager", "Sales User", "Sales Master Manager",
+            "HR Manager", "HR User", "Accounts Manager", "Accounts User",
+            "Stock Manager", "Stock User", "Purchase Manager", "Purchase User",
+            "Manufacturing Manager", "Manufacturing User", "Quality Manager",
+            "Projects Manager", "Projects User", "Maintenance Manager", "Maintenance User",
+            "Administrator"
+        ];
         if (window.frappe && frappe.user && frappe.user_roles) {
-            return !frappe.user_roles.includes("Engraving User");
+            return allowed_roles.some(function(role) {
+                return frappe.user_roles.includes(role);
+            });
         }
         return true;
     }
