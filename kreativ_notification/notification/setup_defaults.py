@@ -138,6 +138,7 @@ def _ensure_checkin(channel: str):
         message_template=tpl,
         channel=channel,
         priority="Normal",
+        enabled=0,  # DISABLED by default — notify_checkin() in employee_notifications handles this
         recipients=[{
             "recipient_type": "Linked Contact",
             "value": "employee",
