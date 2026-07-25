@@ -44,7 +44,7 @@ def send_document_via_whatsapp(
     filename: str,
     caption: str,
     chat_id_override: str = None,
-    source_doctype: str = "System",
+    source_doctype: str = "OpenWA Settings",
     source_docname: str = "",
     source_print_format: str = "",
 ) -> dict:
@@ -76,7 +76,7 @@ def send_image_via_whatsapp(
     filename: str,
     caption: str,
     chat_id_override: str = None,
-    source_doctype: str = "System",
+    source_doctype: str = "OpenWA Settings",
     source_docname: str = "",
 ) -> dict:
     """Send an image/screenshot via WhatsApp (pre-rendered, base64)."""

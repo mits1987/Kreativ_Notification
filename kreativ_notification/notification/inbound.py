@@ -163,25 +163,41 @@ def process_incoming_message(payload: dict):
         conversation = _get_conversation_state(reply_to)
         if conversation:
             _handle_conversation_reply(reply_to, message_text, conversation, employee_user_id)
+            _mark_chat_as_read(reply_to)
             return
 
         # Try invoice keywords
         invoice_identifier = _parse_invoice_reference(message_text, settings)
         if invoice_identifier:
             _handle_invoice_request(reply_to, invoice_identifier, employee_user_id)
+            _mark_chat_as_read(reply_to)
             return
 
         # Try ledger keywords
         ledger_term = _parse_ledger_reference(message_text, settings)
         if ledger_term:
             _handle_ledger_request(reply_to, ledger_term, employee_user_id)
+            _mark_chat_as_read(reply_to)
             return
 
         # No keyword matched — send help
         _send_text(reply_to, _get_help_text(settings))
+        _mark_chat_as_read(reply_to)
 
     except Exception:
         frappe.log_error(title="Inbound WhatsApp Processing Error", message=frappe.get_traceback())
+
+
+def _mark_chat_as_read(chat_id: str):
+    """Mark a chat as read in OpenWA."""
+    try:
+        from kreativ_notification.notification.openwa_client import OpenWAClient
+        client = OpenWAClient()
+        result = client.mark_chat_as_read(chat_id)
+        if result.get("status") != "ok":
+            frappe.logger().warning(f"Failed to mark chat {chat_id} as read: {result.get('message')}")
+    except Exception:
+        frappe.logger().exception(f"Error marking chat {chat_id} as read")
 
 
 # ---------------------------------------------------------------------------

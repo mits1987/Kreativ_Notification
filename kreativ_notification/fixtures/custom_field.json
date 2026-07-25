@@ -9,7 +9,7 @@
     "idx": 3,
     "is_system_generated": 1,
     "dt": "Employee Checkin",
-    "module": "Kreativ Notification",
+    "module": "kreativ_notification",
     "label": "WhatsApp Queued",
     "placeholder": null,
     "fieldname": "whatsapp_sent",

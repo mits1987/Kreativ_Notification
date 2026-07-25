@@ -94,6 +94,11 @@ def get_openwa_config() -> tuple[str, str, str]:
         return "", "", ""
 
 
+def _get_openwa_client() -> "OpenWAClient":
+    """Create an OpenWAClient with settings from OpenWA Settings."""
+    return OpenWAClient()
+
+
 # ---------------------------------------------------------------------------
 # OpenWAClient — single code path for all OpenWA HTTP calls
 # ---------------------------------------------------------------------------
@@ -141,10 +146,11 @@ class OpenWAClient:
         if "no lid for user" in error_lower:
             return {"success": False, "error": error, "permanent": True}
 
-        # Transient: gateway down, timeout, 5xx server errors
+        # Transient: gateway down, timeout, 5xx server errors, 409 session not ready
         if any(keyword in error_lower for keyword in [
             "cannot connect", "connection", "timeout", "timed out",
             "http 500", "http 502", "http 503", "http 504",
+            "http 409", "session is not connected", "client is not ready",
         ]):
             return {"success": False, "error": error, "permanent": False}
 
@@ -336,7 +342,7 @@ class OpenWAClient:
         self._ensure_configured()
         # OpenWA contacts endpoint returns all contacts - we can filter
         # For a more direct check, use the /contacts/{id}/profile-picture endpoint
-        # which returns 404 if contact doesn't exist on WhatsApp
+        # which returns 404 if contact doesn't exist on WhatsApp, or 200 with url=null if no profile pic
         url = "{0}/api/sessions/{1}/contacts/{2}/profile-picture".format(
             self.base_url, self.session_id, chat_id)
         session = _get_session()
@@ -345,7 +351,11 @@ class OpenWAClient:
             if r.status_code == 404:
                 return {"success": True, "exists": False, "error": None}
             if r.ok:
-                return {"success": True, "exists": True, "error": None}
+                data = r.json()
+                # url is null if contact exists on WhatsApp but has no profile picture
+                # or if the number is not on WhatsApp
+                # We consider it "exists" only if url is not null
+                return {"success": True, "exists": data.get("url") is not None, "error": None}
             return self._classify_error("HTTP {0}: {1}".format(r.status_code, r.text[:200]))
         except requests.exceptions.ConnectionError:
             return self._classify_error("Cannot connect to OpenWA at {0}. Is it running?".format(self.base_url))
@@ -415,6 +425,24 @@ class OpenWAClient:
         except Exception:
             pass
         return None
+
+    def mark_chat_as_read(self, chat_id: str) -> dict:
+        """Mark a chat as read/seen in OpenWA."""
+        self._ensure_configured()
+        url = "{0}/api/sessions/{1}/chats/read".format(self.base_url, self.session_id)
+        session = _get_session()
+        try:
+            r = session.post(
+                url,
+                headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
+                json={"chatId": chat_id},
+                timeout=10,
+            )
+            if r.ok:
+                return {"status": "ok", "message": "Chat marked as read"}
+            return {"status": "error", "message": "HTTP {0}: {1}".format(r.status_code, r.text[:200])}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
 
 def _log_error(title: str, message: str) -> None:

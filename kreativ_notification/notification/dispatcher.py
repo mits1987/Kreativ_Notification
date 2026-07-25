@@ -72,7 +72,7 @@ def dispatch(
     filename: str | None = None,
     mimetype: str = "application/pdf",
     message_type: str = "Custom",
-    source_doctype: str = "System",
+    source_doctype: str = "OpenWA Settings",
     source_docname: str = "",
     source_print_format: str = "",
     priority: str = "Normal",
@@ -132,7 +132,8 @@ def dispatch(
         "meta_template_name": meta_template_name,
         "meta_template_language": meta_template_language,
     }))
-    frappe.db.commit()
+    # NOTE: No commit here - Frappe commits the outer transaction after doc_events fire.
+    # The log row and meta will be persisted when the Employee Checkin transaction commits.
 
     # Payload (incl. base64 file) goes to cache, not the DB row
     if file_b64:
@@ -149,13 +150,15 @@ def _payload_key(log_name: str) -> str:
 
 def _enqueue_delivery(log_name: str, priority: str = "Normal"):
     queue = {"Urgent": "short", "Normal": "long", "Bulk": "long"}.get(priority, "long")
+    site = frappe.local.site
     frappe.enqueue(
         "kreativ_notification.notification.dispatcher.deliver",
         queue=queue,
         timeout=600,
         job_id=f"notif-deliver-{log_name}",
-        enqueue_after_commit=True,
+        enqueue_after_commit=False,
         log_name=log_name,
+        site=site,
     )
 
 
@@ -163,8 +166,17 @@ def _enqueue_delivery(log_name: str, priority: str = "Normal"):
 # Background worker
 # ---------------------------------------------------------------------------
 
-def deliver(log_name: str):
+def deliver(log_name: str, site: str = None):
     """Background worker: claim the log row, run the driver, record result."""
+    if site:
+        frappe.init(site)
+        frappe.connect()
+    else:
+        # Fallback: try to get site from local
+        site = getattr(frappe.local, 'site', None)
+        if site:
+            frappe.init(site)
+            frappe.connect()
     # Atomic claim — prevents double delivery if enqueued twice
     frappe.db.sql(
         f"""UPDATE `tab{LOG_DOCTYPE}`
@@ -182,88 +194,94 @@ def deliver(log_name: str):
     meta = json.loads(row["meta"] or "{}")
     channel = row["channel"]
 
-    # ---- Circuit breaker (transport-level only) --------------------------
-    if check_circuit_breaker():
-        _reschedule(log_name, row["retry_count"],
-                    error="Circuit breaker open — channel failing", count_attempt=False)
-        return
-
-    # ---- Quiet hours (Urgent bypasses) -----------------------------------
-    if row["priority"] != "Urgent":
-        wait_min = _quiet_hours_wait(channel)
-        if wait_min:
-            _defer(log_name, minutes=wait_min, reason=DEFER_QUIET_HOURS)
+    try:
+        # ---- Circuit breaker (transport-level only) --------------------------
+        if check_circuit_breaker():
+            _reschedule(log_name, row["retry_count"],
+                        error="Circuit breaker open — channel failing", count_attempt=False)
             return
 
-    # ---- Per-channel rate limit ------------------------------------------
-    if not _rate_limit_ok(channel):
-        _defer(log_name, minutes=1, reason=DEFER_RATE_LIMIT)
-        return
+        # ---- Quiet hours (Urgent bypasses) -----------------------------------
+        if row["priority"] != "Urgent":
+            wait_min = _quiet_hours_wait(channel)
+            if wait_min:
+                _defer(log_name, minutes=wait_min, reason=DEFER_QUIET_HOURS)
+                return
 
-    # ---- Resolve driver + recipient --------------------------------------
-    try:
-        driver = get_driver(channel)
-    except Exception as e:
-        _finalize(log_name, False, f"Driver error: {e}", permanent=True)
-        return
+        # ---- Per-channel rate limit ------------------------------------------
+        if not _rate_limit_ok(channel):
+            _defer(log_name, minutes=1, reason=DEFER_RATE_LIMIT)
+            return
 
-    _normalized = driver.normalize_recipient(row["recipient"])
-    if not _normalized:
-        _finalize(log_name, False,
-                  f"Invalid recipient for {driver.driver_type}: {row['recipient']}",
-                  permanent=True)
-        return
+        # ---- Resolve driver + recipient --------------------------------------
+        try:
+            driver = get_driver(channel)
+        except Exception as e:
+            _finalize(log_name, False, f"Driver error: {e}", permanent=True)
+            return
 
-    # ---- Send ------------------------------------------------------------
-    file_b64 = frappe.cache().get_value(_payload_key(log_name)) if meta.get("has_file") else None
+        _normalized = driver.normalize_recipient(row["recipient"])
+        if not _normalized:
+            _finalize(log_name, False,
+                      f"Invalid recipient for {driver.driver_type}: {row['recipient']}",
+                      permanent=True)
+            return
 
-    # FIX v3: cache expired -> permanent failure with clear error
-    if meta.get("has_file") and not file_b64:
-        _finalize(log_name, False,
-                  "Attachment expired from cache (6h TTL). Re-queue the send.",
-                  permanent=True)
-        return
+        # ---- Send ------------------------------------------------------------
+        file_b64 = frappe.cache().get_value(_payload_key(log_name)) if meta.get("has_file") else None
 
-    try:
-        if meta.get("meta_template_name") and driver.supports_templates:
-            result = driver.send_template(
-                _normalized, meta["meta_template_name"],
-                meta.get("meta_template_language") or "en",
-            )
-        elif file_b64:
-            result = driver.send_document(
-                _normalized, file_b64,
-                meta.get("filename") or "document.pdf",
-                mimetype=meta.get("mimetype") or "application/pdf",
-                caption=meta.get("text") or "",
-                subject=meta.get("subject") or "",
-            )
+        # FIX v3: cache expired -> permanent failure with clear error
+        if meta.get("has_file") and not file_b64:
+            _finalize(log_name, False,
+                      "Attachment expired from cache (6h TTL). Re-queue the send.",
+                      permanent=True)
+            return
+
+        try:
+            if meta.get("meta_template_name") and driver.supports_templates:
+                result = driver.send_template(
+                    _normalized, meta["meta_template_name"],
+                    meta.get("meta_template_language") or "en",
+                )
+            elif file_b64:
+                result = driver.send_document(
+                    _normalized, file_b64,
+                    meta.get("filename") or "document.pdf",
+                    mimetype=meta.get("mimetype") or "application/pdf",
+                    caption=meta.get("text") or "",
+                    subject=meta.get("subject") or "",
+                )
+            else:
+                result = driver.send_text(_normalized, meta.get("text") or "",
+                                          subject=meta.get("subject") or "")
+        except Exception as e:
+            frappe.log_error(title=f"Driver crashed: {channel}",
+                             message=frappe.get_traceback())
+            result = {"success": False, "error": str(e), "permanent": False}
+
+        # ---- Record ----------------------------------------------------------
+        if result.get("success"):
+            reset_circuit_breaker()
+            frappe.db.set_value(LOG_DOCTYPE, log_name, {
+                "status": "Sent",
+                "provider_message_id": result.get("message_id") or "",
+                "error_message": "",
+            }, update_modified=False)
+            frappe.db.commit()
+            frappe.cache().delete_value(_payload_key(log_name))
         else:
-            result = driver.send_text(_normalized, meta.get("text") or "",
-                                      subject=meta.get("subject") or "")
+            # FIX v3: only trip breaker on TRANSPORT failures (non-permanent)
+            if result.get("permanent"):
+                # Bad number, unconfigured channel etc. — do NOT open breaker
+                _finalize(log_name, False, result.get("error"), permanent=True)
+            else:
+                increment_circuit_breaker()
+                _reschedule(log_name, row["retry_count"], error=result.get("error"))
     except Exception as e:
-        frappe.log_error(title=f"Driver crashed: {channel}",
+        # Catch-all: any unexpected error -> reschedule for retry
+        frappe.log_error(title=f"Deliver crashed: {log_name}",
                          message=frappe.get_traceback())
-        result = {"success": False, "error": str(e), "permanent": False}
-
-    # ---- Record ----------------------------------------------------------
-    if result.get("success"):
-        reset_circuit_breaker()
-        frappe.db.set_value(LOG_DOCTYPE, log_name, {
-            "status": "Sent",
-            "provider_message_id": result.get("message_id") or "",
-            "error_message": "",
-        }, update_modified=False)
-        frappe.db.commit()
-        frappe.cache().delete_value(_payload_key(log_name))
-    else:
-        # FIX v3: only trip breaker on TRANSPORT failures (non-permanent)
-        if result.get("permanent"):
-            # Bad number, unconfigured channel etc. — do NOT open breaker
-            _finalize(log_name, False, result.get("error"), permanent=True)
-        else:
-            increment_circuit_breaker()
-            _reschedule(log_name, row["retry_count"], error=result.get("error"))
+        _reschedule(log_name, row.get("retry_count") or 0, error=f"Worker error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +416,31 @@ def cleanup_old_logs(days_sent: int = 90, days_failed: int = 180):
         "creation": ["<", add_to_date(now_datetime(), days=-days_failed)],
     })
     frappe.db.commit()
+
+
+def recover_stuck_processing(max_age_minutes: int = 30):
+    """Cron: recover messages stuck in 'Processing' state.
+
+    If a worker crashes after claiming a message, it stays in 'Processing'
+    forever. This function resets them to 'Queued' for retry.
+    """
+    stuck = frappe.get_all(
+        LOG_DOCTYPE,
+        filters={
+            "status": "Processing",
+            "creation": ["<", add_to_date(now_datetime(), minutes=-max_age_minutes)],
+        },
+        fields=["name", "retry_count", "priority"],
+        limit_page_length=50,
+    )
+    for row in stuck:
+        frappe.db.set_value(LOG_DOCTYPE, row["name"], {
+            "status": "Queued",
+            "error_message": f"Recovered from stuck Processing (worker crash?)",
+        }, update_modified=False)
+    if stuck:
+        frappe.db.commit()
+        frappe.logger().info(f"Recovered {len(stuck)} stuck Processing messages")
 
 
 # ---------------------------------------------------------------------------

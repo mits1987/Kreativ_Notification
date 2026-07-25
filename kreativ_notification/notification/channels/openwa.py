@@ -56,6 +56,15 @@ class OpenWADriver(BaseChannelDriver):
             api_key = legacy.get_password("api_key", raise_exception=False) or api_key
             session_id = (legacy.session_id or session_id).strip()
 
+        # ALWAYS read test_mode and chat_id from OpenWA Settings (the single source of truth)
+        if frappe.db.exists("DocType", "OpenWA Settings"):
+            legacy = frappe.get_cached_doc("OpenWA Settings")
+            self._test_mode = getattr(legacy, "test_mode", 0)
+            self._admin_chat_id = getattr(legacy, "chat_id", None)
+        else:
+            self._test_mode = 0
+            self._admin_chat_id = None
+
         return base_url.rstrip("/"), api_key, session_id
 
     def _client(self) -> OpenWAClient | SendResult:
@@ -146,9 +155,15 @@ class OpenWADriver(BaseChannelDriver):
     # ------------------------------------------------------------------
 
     def normalize_recipient(self, raw: str) -> str | None:
+        # Ensure config is loaded so test_mode/admin_chat_id are available
+        if not hasattr(self, "_test_mode"):
+            self._config()
         raw = (raw or "").strip()
         if not raw:
             return None
+        # If test_mode is enabled, route all messages to admin chat_id
+        if getattr(self, "_test_mode", 0) and getattr(self, "_admin_chat_id", None):
+            return self._admin_chat_id
         # FIX v2: pass through ALL chat-id forms. The old version only
         # recognised @c.us/@g.us — an inbound reply_to like
         # "123456789@lid" was digit-stripped and rebuilt as a wrong

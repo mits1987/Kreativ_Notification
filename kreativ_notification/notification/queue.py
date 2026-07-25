@@ -132,7 +132,7 @@ def process_send(queue_item: str):
         idem = f"queue:{queue_item}"
         common = dict(
             recipient=doc.recipient,
-            source_doctype=doc.reference_doctype or "System",
+            source_doctype=doc.reference_doctype or "OpenWA Settings",
             source_docname=doc.reference_docname or "",
             priority="Normal",
             idempotency_key=idem,
@@ -159,7 +159,7 @@ def process_send(queue_item: str):
             )
         elif doc.action_type == "send_test":
             result = dispatch(
-                text=payload.get("text") or "Test message from Kreativ Notification.",
+                text=payload.get("text") or "Test message from kreativ_notification.",
                 message_type="Test",
                 **common,
             )

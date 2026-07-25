@@ -121,9 +121,9 @@ def get_whatsapp_chats(limit: int = 50) -> list:
     client = _get_openwa_client()
 
     try:
-        resp = client.get_chats(limit=limit)
+        resp = client.get_chats()
         chats = []
-        for c in resp:
+        for c in resp.get("chats", []):
             chats.append({
                 "chat_id": c.get("id"),
                 "name": c.get("name") or c.get("pushname") or c.get("id"),
@@ -147,10 +147,11 @@ def search_whatsapp_contacts(query: str, limit: int = 20) -> list:
     client = _get_openwa_client()
 
     try:
-        chats = client.get_chats(limit=200)
+        resp = client.get_chats()
+        all_chats = resp.get("chats", []) + resp.get("groups", [])
         results = []
         q = query.lower()
-        for c in chats:
+        for c in all_chats:
             name = (c.get("name") or c.get("pushname") or "").lower()
             chat_id = c.get("id", "")
             if q in name or q in chat_id:

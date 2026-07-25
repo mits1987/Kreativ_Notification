@@ -72,7 +72,7 @@
  "links": [],
  "modified": "2026-07-20 02:50:40.128874",
  "modified_by": "Administrator",
- "module": "Kreativ Notification",
+ "module": "kreativ_notification",
  "name": "Notification Queue",
  "owner": "Administrator",
  "permissions": [

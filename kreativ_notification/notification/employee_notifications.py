@@ -52,6 +52,24 @@ def _employee_recipient(employee: str, settings) -> str | None:
     return digits + "@c.us"
 
 
+def _is_on_whatsapp(chat_id: str) -> bool:
+    """Check if a contact exists on WhatsApp via OpenWA profile picture endpoint."""
+    try:
+        from kreativ_notification.notification.openwa_client import OpenWAClient
+        client = OpenWAClient()
+        # Use the profile picture endpoint - returns URL if on WhatsApp, null if not
+        url = "{0}/api/sessions/{1}/contacts/{2}/profile-picture".format(
+            client.base_url, client.session_id, chat_id)
+        session = client._get_session()
+        r = session.get(url, headers={"X-API-Key": client.api_key}, timeout=10)
+        if r.ok:
+            data = r.json()
+            return data.get("url") is not None
+    except Exception:
+        pass
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Checkin notifications
 # ---------------------------------------------------------------------------
