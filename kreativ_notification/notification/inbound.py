@@ -14,6 +14,7 @@ from kreativ_notification.notification.openwa_client import (
     check_circuit_breaker,
     increment_circuit_breaker,
     reset_circuit_breaker,
+    OpenWAClient,
 )
 from kreativ_notification.notification.pdf_utils import generate_pdf_bytes, generate_pdf_from_html
 from kreativ_notification.notification.dispatcher import dispatch
@@ -453,13 +454,41 @@ def _clear_conversation_state(chat_id: str):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_lid_to_phone(lid: str) -> str | None:
+    """Resolve OpenWA LID to @c.us phone format via OpenWA API."""
+    try:
+        client = OpenWAClient()
+        if not client.base_url or not client.api_key:
+            return None
+        from kreativ_notification.notification.openwa_client import _get_session
+        sess = _get_session()
+        url = f"{client.base_url}/api/sessions/{client.session_id}/contacts/{lid}"
+        r = sess.get(url, headers={"X-API-Key": client.api_key}, timeout=10)
+        if r.ok:
+            data = r.json()
+            return data.get("id")  # returns "919023587002@c.us"
+    except Exception:
+        frappe.logger().exception(f"Failed to resolve LID {lid} to phone")
+    return None
+
+
 def _get_employee_user_id(phone_number: str) -> str | None:
     """Find employee by cell_number and return their linked user_id.
 
     Normalizes phone from '91xxxxxxxxxx@c.us' format and matches
     against Employee.cell_number (last 10 digits).
     Also validates employee has a role in allowed_roles (if configured).
+    Handles @lid format by resolving to phone via OpenWA API.
     """
+    # Resolve @lid to @c.us phone first
+    if phone_number.endswith("@lid"):
+        resolved = _resolve_lid_to_phone(phone_number)
+        if resolved:
+            phone_number = resolved
+        else:
+            frappe.logger().warning(f"Could not resolve LID to phone: {phone_number}")
+            return None
+
     # Normalize phone: "91xxxxxxxxxx@c.us" -> "91xxxxxxxxxx"
     clean_phone = phone_number
     if "@" in clean_phone:
