@@ -45,10 +45,6 @@ doc_events = {
         "on_update": "kreativ_notification.notification.rules_engine.clear_rule_cache",
         "on_trash": "kreativ_notification.notification.rules_engine.clear_rule_cache",
     },
-    "Employee Checkin": {
-        "after_insert": "kreativ_notification.notification.employee_notifications.notify_checkin",
-        "on_update": "kreativ_notification.notification.employee_notifications.notify_checkin",
-    },
     "Salary Slip": {
         "on_submit": "kreativ_notification.notification.employee_notifications.send_salary_slip",
     },
@@ -59,9 +55,10 @@ doc_events = {
 # ---------------------------------------------------------------------------
 scheduler_events = {
     "cron": {
-        # dispatcher safety net: due retries + stuck rows
+        # dispatcher safety net: due retries + stuck rows + stuck processing recovery
         "*/2 * * * *": [
             "kreativ_notification.notification.dispatcher.process_due_retries",
+            "kreativ_notification.notification.dispatcher.recover_stuck_processing",
         ],
         # fallback channel escalation + channel health
         "*/5 * * * *": [
@@ -110,8 +107,8 @@ patches = [
 # Fixtures — ship the default rules/templates that replace the old
 # hardcoded Salary Slip + Employee Checkin behavior
 fixtures = [
-    {"dt": "Message Template", "filters": [["module", "=", "Kreativ Notification"]]},
-    {"dt": "Notification Rule", "filters": [["module", "=", "Kreativ Notification"]]},
+    {"dt": "Message Template", "filters": [["module", "=", "kreativ_notification"]]},
+    {"dt": "Notification Rule", "filters": [["module", "=", "kreativ_notification"]]},
     {"dt": "WhatsApp Send Log"},
     {"dt": "Custom Field", "filters": [["fieldname", "=", "whatsapp_sent"], ["dt", "=", "Employee Checkin"]]},
 ]
