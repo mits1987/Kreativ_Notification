@@ -112,6 +112,7 @@ def _ensure_salary_slip(channel: str):
         message_template=tpl,
         channel=channel,
         priority="Normal",
+        enabled=0,  # DISABLED by default — on_salary_slip_whatsapp handler owns this
         recipients=[{
             "recipient_type": "Linked Contact",
             "value": "employee",

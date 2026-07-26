@@ -43,10 +43,10 @@ def main():
     test("import setup_defaults", lambda: hasattr(__import__("kreativ_notification.notification.setup_defaults", fromlist=["setup_defaults"]), "setup_defaults"))
 
     # gravures_custom integration (skip if app not installed)
-    try:
+    if "gravures_custom" in frappe.get_installed_apps():
         test("gravures_custom.log_whatsapp_send", lambda: hasattr(__import__("gravures_custom.overrides", fromlist=["log_whatsapp_send"]), "log_whatsapp_send"))
         test("gravures_custom.send_proofing_whatsapp", lambda: hasattr(__import__("gravures_custom.overrides", fromlist=["send_proofing_whatsapp"]), "send_proofing_whatsapp"))
-    except ImportError:
+    else:
         results.append("  SKIP: gravures_custom not installed")
 
     # Hook checks
