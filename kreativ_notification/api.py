@@ -149,11 +149,16 @@ def search_whatsapp_contacts(query: str, limit: int = 20) -> dict:
 @frappe.whitelist()
 def send_print_pdf_whatsapp(
     doctype: str,
-    name: str,
+    name: str = None,
+    docname: str = None,
     print_format: str = None,
     chat_id: str = None,
     caption: str = None,
 ) -> dict:
+    # Accept both 'name' (used in print preview JS) and 'docname' (legacy)
+    doc_name = name or docname
+    if not doc_name:
+        frappe.throw(_("Missing parameter: name or docname"))
     """Generate PDF from print preview and send via WhatsApp."""
     from kreativ_notification.notification.pdf_utils import generate_pdf_bytes
     import base64
@@ -161,7 +166,7 @@ def send_print_pdf_whatsapp(
     settings = frappe.get_cached_doc("OpenWA Settings")
     resolved_print_format = print_format or settings.invoice_print_format or "Standard"
 
-    pdf_bytes = generate_pdf_bytes(doctype, name, resolved_print_format, channel_name="WhatsApp - OpenWA")
+    pdf_bytes = generate_pdf_bytes(doctype, doc_name, resolved_print_format, channel_name="WhatsApp - OpenWA")
     if isinstance(pdf_bytes, bytes):
         base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
     else:
@@ -169,11 +174,11 @@ def send_print_pdf_whatsapp(
 
     return send_document_via_whatsapp(
         base64_pdf=base64_pdf,
-        filename=f"{name}.pdf",
-        caption=caption or f"{doctype}: {name}",
+        filename=f"{doc_name}.pdf",
+        caption=caption or f"{doctype}: {doc_name}",
         chat_id_override=chat_id,
         source_doctype=doctype,
-        source_docname=name,
+        source_docname=doc_name,
         source_print_format=resolved_print_format,
     )
 
