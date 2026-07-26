@@ -118,3 +118,6 @@ fixtures = [
 #
 #   notification_channel_drivers = {"Telegram": "my_app.drivers.TelegramDriver"}
 #   whatsapp_bot_commands = ["my_app.bot.leave_balance_command"]
+
+# Bench commands
+commands = "kreativ_notification.commands"
