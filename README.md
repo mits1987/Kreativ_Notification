@@ -2,7 +2,29 @@
 
 WhatsApp integration for ERPNext v16 — outbound notifications, inbound auto-reply bot, and Print Preview "Send to WhatsApp" button.
 
-**Current Version:** Platform-ready (v2) with multi-channel support, pluggable drivers, and no-code rules engine.
+**Current Version:** v0.2.0 (2026-07-26)
+
+---
+
+## Release v0.2.0 (2026-07-26)
+
+| Feature | Status |
+|---------|--------|
+| **Multi-Channel Architecture** | ✅ Pluggable drivers (OpenWA, Meta Cloud, Email) |
+| **OpenWA Driver** | ✅ `channels/openwa.py` — self-hosted WhatsApp |
+| **Meta Cloud API Driver** | ✅ `channels/meta_cloud.py` — official Business API |
+| **Email Driver** | ✅ `channels/email_channel.py` — first-class email channel |
+| **Notification Rules** | ✅ No-code rules for doc events + date-based triggers |
+| **Message Templates** | ✅ Jinja templates with language variants |
+| **Dispatcher Pipeline** | ✅ Idempotency, outbox, retry/backoff, quiet hours |
+| **Fallback Channels** | ✅ Auto-escalation (WhatsApp → Email after N minutes) |
+| **Circuit Breaker** | ✅ Per-channel failure tracking |
+| **Rate Limiting** | ✅ Per-channel rate limits |
+| **Exponential Backoff** | ✅ 5 retry attempts (1, 5, 15, 60, 180 min) |
+| **Atomic Claim Pattern** | ✅ Prevents double delivery |
+| **Print Preview WA Button** | ✅ Contact picker modal, search, PDF with selected print format |
+| **Inbound Auto-Reply Bot** | ✅ Invoice/ledger fetch via WhatsApp (LID → phone resolution) |
+| **Systemd Worker Persistence** | ✅ RQ workers survive bench/VM restart |
 
 ---
 
