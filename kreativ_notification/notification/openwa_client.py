@@ -248,7 +248,11 @@ class OpenWAClient:
 
                     name = c.get("name", "") or c.get("pushname", "") or cid
                     is_group = c.get("isGroup", False) or "@g.us" in cid
-                    last_msg = c.get("lastMessage", {}).get("body", "") if isinstance(c.get("lastMessage"), dict) else ""
+                    last_msg_raw = c.get("lastMessage", "")
+                    if isinstance(last_msg_raw, dict):
+                        last_msg = last_msg_raw.get("body", "")
+                    else:
+                        last_msg = str(last_msg_raw) if last_msg_raw else ""
                     timestamp = c.get("timestamp", 0)
                     unread = c.get("unreadCount", 0)
 

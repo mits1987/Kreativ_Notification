@@ -378,9 +378,10 @@
 
         d.fields_dict.picker_html.$wrapper.html(html);
 
-        // Hover + click
+        // Hover + click - unbind first to prevent duplicate handlers on re-render
         d.fields_dict.picker_html.$wrapper
             .find(".wa-picker-item")
+            .off("mouseenter mouseleave click")
             .on("mouseenter", function () {
                 $(this).css("background", "#f0faf4");
             })
@@ -443,39 +444,30 @@
        Send PDF to selected chat
     ----------------------------------------------------------- */
     function sendWithSelectedChat(doctype, name, print_format, _lang, chatId, chatName) {
-        // Confirm before sending
         var safeChatName = frappe.utils.escape_html(chatName);
-        frappe.confirm(
-            "Send PDF to <b>" + safeChatName + "</b> via WhatsApp?",
-            function () {
-                frappe.show_alert({ message: "Sending PDF to " + safeChatName + "...", indicator: "blue" });
+        frappe.show_alert({ message: "Sending PDF to " + safeChatName + "...", indicator: "blue" });
 
-                frappe.call({
-                    method: "kreativ_notification.api.send_print_pdf_whatsapp",
-                    args: {
-                        doctype: doctype,
-                        name: name,
-                        print_format: print_format || undefined,
-                        chat_id: chatId,
-                    },
-                    callback: function (r) {
-                        if (r.message && r.message.success) {
-                            frappe.show_alert({ message: "Sent PDF to " + safeChatName + "!", indicator: "green" });
-                        } else if (r._server_messages) {
-                            frappe.msgprint(r._server_messages.join("<br>"));
-                        } else {
-                            frappe.msgprint("Unexpected response from server.");
-                        }
-                    },
-                    error: function (err) {
-                        frappe.msgprint("Failed: " + (err._message || "Unknown error."));
-                    },
-                });
+        frappe.call({
+            method: "kreativ_notification.api.send_print_pdf_whatsapp",
+            args: {
+                doctype: doctype,
+                name: name,
+                print_format: print_format || undefined,
+                chat_id: chatId,
             },
-            function () {
-                // User cancelled - do nothing
-            }
-        );
+            callback: function (r) {
+                if (r.message && r.message.success) {
+                    frappe.show_alert({ message: "Sent PDF to " + safeChatName + "!", indicator: "green" });
+                } else if (r._server_messages) {
+                    frappe.msgprint(r._server_messages.join("<br>"));
+                } else {
+                    frappe.msgprint("Unexpected response from server.");
+                }
+            },
+            error: function (err) {
+                frappe.msgprint("Failed: " + (err._message || "Unknown error."));
+            },
+        });
     }
 
     /* -----------------------------------------------------------

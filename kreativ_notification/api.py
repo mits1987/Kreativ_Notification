@@ -36,7 +36,7 @@ def _get_openwa_client():
     return __import__(
         "kreativ_notification.notification.openwa_client",
         fromlist=["OpenWAClient"]
-    ).OpenWAClient(settings.base_url, settings.api_key)
+    ).OpenWAClient(settings.base_url, settings.get_password("api_key"))
 
 
 # --- Dashboard / Workspace send functions ---
@@ -112,77 +112,69 @@ def validate_phone_number(phone: str) -> dict:
 
 
 @frappe.whitelist()
-def get_whatsapp_chats(limit: int = 50) -> list:
+def get_whatsapp_chats(limit: int = 50) -> dict:
     """Fetch recent WhatsApp chats from OpenWA for contact picker."""
     settings = _get_openwa_settings()
     if not settings.enabled:
-        return []
+        return {"chats": [], "groups": []}
 
     client = _get_openwa_client()
 
     try:
         resp = client.get_chats()
-        chats = []
-        for c in resp.get("chats", []):
-            chats.append({
-                "chat_id": c.get("id"),
-                "name": c.get("name") or c.get("pushname") or c.get("id"),
-                "last_message": c.get("lastMessage", {}).get("body") if c.get("lastMessage") else "",
-                "timestamp": c.get("lastMessage", {}).get("timestamp") if c.get("lastMessage") else "",
-                "is_group": c.get("isGroup", False),
-            })
-        return chats
+        # Client already returns normalized format; just return it
+        return {"chats": resp.get("chats", []), "groups": resp.get("groups", [])}
     except Exception as e:
         frappe.log_error(f"Failed to fetch WhatsApp chats: {e}", "WhatsApp Chats")
-        return []
+        return {"chats": [], "groups": []}
 
 
 @frappe.whitelist()
-def search_whatsapp_contacts(query: str, limit: int = 20) -> list:
+def search_whatsapp_contacts(query: str, limit: int = 20) -> dict:
     """Search WhatsApp contacts by name/number."""
     settings = _get_openwa_settings()
     if not settings.enabled:
-        return []
+        return {"chats": [], "groups": []}
 
     client = _get_openwa_client()
 
     try:
-        resp = client.get_chats()
-        all_chats = resp.get("chats", []) + resp.get("groups", [])
-        results = []
-        q = query.lower()
-        for c in all_chats:
-            name = (c.get("name") or c.get("pushname") or "").lower()
-            chat_id = c.get("id", "")
-            if q in name or q in chat_id:
-                results.append({
-                    "chat_id": chat_id,
-                    "name": c.get("name") or c.get("pushname") or chat_id,
-                    "is_group": c.get("isGroup", False),
-                })
-                if len(results) >= limit:
-                    break
-        return results
+        resp = client.get_chats(search=query)
+        return resp
     except Exception as e:
         frappe.log_error(f"WhatsApp contact search failed: {e}", "WhatsApp Search")
-        return []
+        return {"chats": [], "groups": []}
 
 
 @frappe.whitelist()
 def send_print_pdf_whatsapp(
     doctype: str,
-    docname: str,
+    name: str,
     print_format: str = None,
     chat_id: str = None,
     caption: str = None,
 ) -> dict:
     """Generate PDF from print preview and send via WhatsApp."""
+    from kreativ_notification.notification.pdf_utils import generate_pdf_bytes
+    import base64
+
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    resolved_print_format = print_format or settings.invoice_print_format or "Standard"
+
+    pdf_bytes = generate_pdf_bytes(doctype, name, resolved_print_format, channel_name="WhatsApp - OpenWA")
+    if isinstance(pdf_bytes, bytes):
+        base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+    else:
+        base64_pdf = pdf_bytes
+
     return send_document_via_whatsapp(
-        source_doctype=doctype,
-        source_docname=docname,
-        source_print_format=print_format,
+        base64_pdf=base64_pdf,
+        filename=f"{name}.pdf",
+        caption=caption or f"{doctype}: {name}",
         chat_id_override=chat_id,
-        caption=caption,
+        source_doctype=doctype,
+        source_docname=name,
+        source_print_format=resolved_print_format,
     )
 
 
