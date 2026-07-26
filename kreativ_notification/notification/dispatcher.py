@@ -41,9 +41,9 @@ from frappe.utils import add_to_date, cint, get_time, now_datetime, nowtime
 
 from kreativ_notification.notification.channels import get_default_channel, get_driver
 from kreativ_notification.notification.openwa_client import (
-    check_circuit_breaker,
-    increment_circuit_breaker,
-    reset_circuit_breaker,
+    check_circuit_breaker as check_gateway_breaker,
+    increment_circuit_breaker as increment_gateway_breaker,
+    reset_circuit_breaker as reset_gateway_breaker,
 )
 
 LOG_DOCTYPE = "WhatsApp Send Log"  # kept for continuity; now channel-aware
@@ -53,6 +53,23 @@ MAX_ATTEMPTS = 5
 BACKOFF_MINUTES = [1, 5, 15, 60, 180]
 
 CIRCUIT_THRESHOLD = 3
+
+# Per-channel transport breaker (local keys: notif_breaker:{site}:{channel})
+# Separated from gateway breaker (openwa:streak:{site}) — it protects the gateway,
+# not individual channels. Email/Meta failures must not block WhatsApp.
+
+def _breaker_key(channel: str) -> str:
+    return f"notif_breaker:{frappe.local.site}:{channel}"
+
+def _breaker_open(channel: str) -> bool:
+    """Return True if channel transport breaker is open. Does NOT throw."""
+    return bool(frappe.cache().get_value(_breaker_key(channel)))
+
+def _breaker_trip(channel: str):
+    frappe.cache().set_value(_breaker_key(channel), 1, expires_in_sec=300)
+
+def _breaker_reset(channel: str):
+    frappe.cache().delete_value(_breaker_key(channel))
 
 # Reason strings written by _defer(); process_fallbacks keys off these.
 DEFER_QUIET_HOURS = "Quiet hours"
@@ -195,8 +212,8 @@ def deliver(log_name: str, site: str = None):
     channel = row["channel"]
 
     try:
-        # ---- Circuit breaker (transport-level only) --------------------------
-        if check_circuit_breaker():
+        # ---- Circuit breaker (transport-level, per-channel) --------------------
+        if _breaker_open(channel):
             _reschedule(log_name, row["retry_count"],
                         error="Circuit breaker open — channel failing", count_attempt=False)
             return
@@ -261,7 +278,9 @@ def deliver(log_name: str, site: str = None):
 
         # ---- Record ----------------------------------------------------------
         if result.get("success"):
-            reset_circuit_breaker()
+            _breaker_reset(channel)
+            if channel == "Primary WhatsApp":
+                reset_gateway_breaker()
             frappe.db.set_value(LOG_DOCTYPE, log_name, {
                 "status": "Sent",
                 "provider_message_id": result.get("message_id") or "",
@@ -275,7 +294,9 @@ def deliver(log_name: str, site: str = None):
                 # Bad number, unconfigured channel etc. — do NOT open breaker
                 _finalize(log_name, False, result.get("error"), permanent=True)
             else:
-                increment_circuit_breaker()
+                _breaker_trip(channel)
+                if channel == "Primary WhatsApp":
+                    increment_gateway_breaker()
                 _reschedule(log_name, row["retry_count"], error=result.get("error"))
     except Exception as e:
         # Catch-all: any unexpected error -> reschedule for retry
