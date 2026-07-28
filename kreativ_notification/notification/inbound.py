@@ -361,7 +361,7 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, e
             "party_type": "Customer",
             "party": [customer_name],
             "party_name": [customer_display] if customer_display else [customer_name],
-            "show_remarks": 1,
+            "show_remarks": 0,
             "categorize_by": "Categorize by Voucher (Consolidated)",
             "show_opening_entries": 0,
             "include_default_book_entries": 0,
