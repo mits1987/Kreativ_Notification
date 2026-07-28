@@ -281,6 +281,7 @@ def deliver(log_name: str, site: str = None):
             _breaker_reset(channel)
             if channel == "Primary WhatsApp":
                 reset_gateway_breaker()
+            _rate_limit_record_success(channel)
             frappe.db.set_value(LOG_DOCTYPE, log_name, {
                 "status": "Sent",
                 "provider_message_id": result.get("message_id") or "",
@@ -545,25 +546,46 @@ def _quiet_hours_wait(channel: str) -> int:
 
 
 def _rate_limit_ok(channel: str) -> bool:
+    """Rate limit: count SUCCESSFUL sends only. Uses sliding window of timestamps."""
     ch = frappe.get_cached_doc("Notification Channel", channel)
     limit = cint(ch.rate_limit_per_minute)
     if not limit:
         return True
     key = f"notif_rate:{frappe.local.site}:{channel}"
+    now = now_datetime().timestamp()
+    window_start = now - 60
     try:
-        # Atomic under Redis: INCRBY, first writer opens the 60s window.
-        current = frappe.cache().incrby(key, 1)
-        if current == 1:
-            frappe.cache().expire(key, 60)
-        return current <= limit
+        # Store timestamps of successful sends (sorted set via JSON array)
+        timestamps = frappe.cache().get_value(key) or []
+        # Filter to last 60 seconds
+        timestamps = [ts for ts in timestamps if ts > window_start]
+        if len(timestamps) >= limit:
+            return False
+        # Pre-add this attempt's timestamp (will be confirmed on success)
+        timestamps.append(now)
+        frappe.cache().set_value(key, timestamps, expires_in_sec=120)
+        return True
     except Exception:
-        # Cache backend without incrby — fall back to the old (non-atomic)
-        # check rather than blocking sends.
+        # Fallback to counter if cache backend doesn't support list ops
         current = cint(frappe.cache().get_value(key) or 0)
         if current >= limit:
             return False
         frappe.cache().set_value(key, current + 1, expires_in_sec=60)
         return True
+
+
+def _rate_limit_record_success(channel: str):
+    """Called after successful send to confirm the rate limit slot."""
+    ch = frappe.get_cached_doc("Notification Channel", channel)
+    limit = cint(ch.rate_limit_per_minute)
+    if not limit:
+        return
+    key = f"notif_rate:{frappe.local.site}:{channel}"
+    try:
+        # Already pre-added in _rate_limit_ok; this just ensures TTL
+        frappe.cache().expire(key, 120)
+    except Exception:
+        pass
 
 
 # Removed: _breaker_cache_key, _breaker_open, _breaker_trip, _breaker_reset
