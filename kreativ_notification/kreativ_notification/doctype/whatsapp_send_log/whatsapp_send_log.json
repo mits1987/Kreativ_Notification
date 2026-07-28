@@ -33,7 +33,7 @@
     "delivery_synced",
     "section_error",
     "error_message",
-    "meta"
+"log_meta"
   ],
   "fields": [
     {
@@ -184,7 +184,7 @@
       "collapsible": 1,
       "fieldname": "section_error",
       "fieldtype": "Section Break",
-      "label": "Error & Meta"
+      "label": "Error & Log Meta"
     },
     {
       "fieldname": "error_message",
@@ -194,7 +194,7 @@
     {
       "fieldname": "meta",
       "fieldtype": "Long Text",
-      "label": "Meta"
+      "label": "Log Meta"
     }
   ],
   "issingle": 0,

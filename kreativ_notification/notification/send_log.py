@@ -31,7 +31,7 @@ def create_log(
         })
         log.insert(ignore_permissions=True)
         # Use db_set to avoid conflict with Document.meta property
-        frappe.db.set_value("WhatsApp Send Log", log.name, "meta", frappe.as_json(meta or {}))
+        frappe.db.set_value("WhatsApp Send Log", log.name, "log_meta", frappe.as_json(meta or {}))
         frappe.db.commit()
         return log.name
     except Exception:

@@ -139,8 +139,8 @@ def dispatch(
         "notification_rule": rule,
     })
     log.insert(ignore_permissions=True)
-    # Use db_set for 'meta' field to avoid conflict with Document.meta property
-    frappe.db.set_value(LOG_DOCTYPE, log.name, "meta", frappe.as_json({
+    # Use db_set for 'log_meta' field to avoid conflict with Document.meta property
+    frappe.db.set_value(LOG_DOCTYPE, log.name, "log_meta", frappe.as_json({
         "text": text,
         "subject": subject,
         "filename": filename,
@@ -203,12 +203,12 @@ def deliver(log_name: str, site: str = None):
     )
     frappe.db.commit()
     row = frappe.db.get_value(LOG_DOCTYPE, log_name,
-                              ["status", "channel", "recipient", "meta",
+                              ["status", "channel", "recipient", "log_meta",
                                "retry_count", "priority"], as_dict=True)
     if not row or row["status"] != "Processing":
         return  # someone else claimed it, or it's already terminal
 
-    meta = json.loads(row["meta"] or "{}")
+    meta = json.loads(row["log_meta"] or "{}")
     channel = row["channel"]
 
     try:
@@ -390,13 +390,13 @@ def process_fallbacks():
             "status": ["in", ["Queued", "Processing", "Failed"]],
             "error_message": ["!=", DEFER_QUIET_HOURS],  # FIX v3
         },
-        fields=["name", "fallback_channel", "recipient", "meta",
+        fields=["name", "fallback_channel", "recipient", "log_meta",
                 "source_doctype", "source_docname", "message_type",
                 "priority", "notification_rule"],
         limit_page_length=50,
     )
     for row in overdue:
-        meta = json.loads(row["meta"] or "{}")
+        meta = json.loads(row["log_meta"] or "{}")
         frappe.db.set_value(LOG_DOCTYPE, row["name"], "fallback_fired", 1,
                             update_modified=False)
 

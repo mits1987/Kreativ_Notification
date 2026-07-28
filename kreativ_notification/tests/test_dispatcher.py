@@ -71,7 +71,7 @@ class TestCircuitBreakerIgnoresPermanent(IntegrationTestCase):
             "status": "Processing",
             "channel": "WhatsApp - OpenWA",
             "recipient": "invalid",
-            "meta": "{}",
+            "log_meta": "{}",
             "retry_count": 0,
             "priority": "Normal",
         }
@@ -111,7 +111,7 @@ class TestCircuitBreakerIgnoresPermanent(IntegrationTestCase):
             "status": "Processing",
             "channel": "WhatsApp - OpenWA",
             "recipient": "919999999999@c.us",
-            "meta": '{"text": "Test", "has_file": false}',
+            "log_meta": '{"text": "Test", "has_file": false}',
             "retry_count": 0,
             "priority": "Normal",
         }
@@ -155,7 +155,7 @@ class TestExpiredAttachmentPayload(IntegrationTestCase):
             "status": "Processing",
             "channel": "WhatsApp - OpenWA",
             "recipient": "919999999999@c.us",
-            "meta": '{"text": "Test with PDF", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
+            "log_meta": '{"text": "Test with PDF", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
             "retry_count": 0,
             "priority": "Normal",
         }
@@ -195,7 +195,7 @@ class TestFallbackSkipsQuietHours(IntegrationTestCase):
         cache_instance = _setup_frappe_cache_mock(mock_cache)
 
         mock_get_all.return_value = [
-            {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x", "meta": "{}",
+            {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x", "log_meta": "{}",
              "source_doctype": "Test", "source_docname": "1", "message_type": "Custom",
              "priority": "Normal", "notification_rule": None},
         ]
@@ -223,7 +223,7 @@ class TestFallbackReattachesFile(IntegrationTestCase):
 
         mock_get_all.return_value = [
             {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x",
-             "meta": '{"text": "Test", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
+             "log_meta": '{"text": "Test", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
              "source_doctype": "Test", "source_docname": "1", "message_type": "Custom",
              "priority": "Normal", "notification_rule": None},
         ]
@@ -246,7 +246,7 @@ class TestFallbackReattachesFile(IntegrationTestCase):
 
         mock_get_all.return_value = [
             {"name": "LOG-1", "fallback_channel": "SMS", "recipient": "x",
-             "meta": '{"text": "Test", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
+             "log_meta": '{"text": "Test", "has_file": true, "filename": "test.pdf", "mimetype": "application/pdf"}',
              "source_doctype": "Test", "source_docname": "1", "message_type": "Custom",
              "priority": "Normal", "notification_rule": None},
         ]
