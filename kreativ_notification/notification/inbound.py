@@ -414,7 +414,17 @@ def _handle_conversation_reply(reply_to: str, message_text: str, conversation: d
             if 1 <= choice <= len(customers):
                 selected = customers[choice - 1]
                 _clear_conversation_state(reply_to)
-                _send_ledger_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
+                
+                # Check if this was a remote fetch command
+                cmd_name = conversation.get("cmd_name")
+                if cmd_name:
+                    cmd = frappe.get_doc("WhatsApp Bot Command", cmd_name)
+                    if cmd.api_link:
+                        _fetch_remote_ledger_pdf(cmd, selected["name"], reply_to, employee_user_id)
+                    else:
+                        _send_ledger_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
+                else:
+                    _send_ledger_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
             else:
                 _send_text(reply_to, f"Please enter a number between 1 and {len(customers)}.")
         except ValueError:
@@ -563,8 +573,33 @@ def _handle_document_command(cmd, reply_to: str, identifier: str, employee_user_
 def _handle_report_command(cmd, reply_to: str, identifier: str, employee_user_id: str):
     """Handle Report fetch type - run report and send PDF."""
     if cmd.doc_type == "Customer":
-        # Reuse existing ledger logic for Customer
-        _send_ledger_pdf(identifier, identifier, reply_to, employee_user_id)
+        # Search for customers matching identifier (partial name match)
+        customers = _search_customers(identifier)
+        if not customers:
+            _send_text(reply_to, f"No customers found matching '{identifier}'.")
+            return
+
+        if len(customers) == 1:
+            # Single match - fetch ledger PDF directly
+            if cmd.api_link:
+                _fetch_remote_ledger_pdf(cmd, customers[0]["name"], reply_to, employee_user_id)
+            else:
+                _send_ledger_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to, employee_user_id)
+            return
+
+        # Multiple matches — send numbered list, save conversation state
+        numbered_list = "Found {0} customers:\n\n".format(len(customers))
+        for i, c in enumerate(customers, 1):
+            numbered_list += "{0}. {1}\n".format(i, c.get("customer_name", c["name"]))
+        numbered_list += "\nReply with number (1-{0}) to get ledger PDF".format(len(customers))
+
+        _save_conversation_state(reply_to, {
+            "type": "ledger_selection",
+            "customers": customers,
+            "cmd_name": cmd.name,  # Store command name for remote/local fetch
+            "created_at": time.time(),
+        })
+        _send_text(reply_to, numbered_list)
     else:
         _send_text(reply_to, f"Report type not supported for {cmd.doc_type}")
 
@@ -645,6 +680,57 @@ def _fetch_remote_pdf(cmd, doctype: str, docname: str) -> bytes:
     r = requests.get(url, params=params, headers=headers, timeout=30)
     r.raise_for_status()
     return r.content
+
+
+def _fetch_remote_ledger_pdf(cmd, customer_name: str, reply_to: str, employee_user_id: str):
+    """Fetch Customer Ledger PDF from remote Frappe instance via custom API."""
+    # Call custom remote method that generates ledger PDF for customer
+    url = f"{cmd.api_link}/api/method/kreativ_notification.api.get_customer_ledger_pdf"
+    params = {"customer": customer_name}
+
+    headers = {}
+    if cmd.auth_type == "Token":
+        child_doc = frappe.get_doc("WhatsApp Bot Command", cmd.name)
+        api_key = child_doc.get_password("api_key")
+        api_password = child_doc.get_password("api_password")
+        headers["Authorization"] = f"token {api_key}:{api_password}"
+    elif cmd.auth_type == "Basic":
+        import base64 as b64
+        child_doc = frappe.get_doc("WhatsApp Bot Command", cmd.name)
+        api_password = child_doc.get_password("api_password")
+        headers["Authorization"] = f"Basic {b64.b64encode(api_password.encode()).decode()}"
+
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=60)
+        r.raise_for_status()
+        pdf_bytes = r.content
+
+        if isinstance(pdf_bytes, bytes):
+            base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+        else:
+            base64_pdf = pdf_bytes
+
+        result = dispatch(
+            recipient=reply_to,
+            text=f"Customer Ledger: {customer_name}",
+            file_b64=base64_pdf,
+            filename=f"Statement_{customer_name}.pdf",
+            mimetype="application/pdf",
+            message_type="Print PDF",
+            source_doctype="Customer",
+            source_docname=customer_name,
+            source_print_format="",
+            priority="Normal",
+        )
+
+        if result.get("success"):
+            reset_circuit_breaker()
+        else:
+            increment_circuit_breaker()
+
+    except Exception:
+        frappe.log_error(title=f"Remote Ledger Fetch Failed for {customer_name}", message=frappe.get_traceback())
+        _send_text(reply_to, f"Failed to fetch ledger for {customer_name} from remote server.")
 
 
 # ---------------------------------------------------------------------------

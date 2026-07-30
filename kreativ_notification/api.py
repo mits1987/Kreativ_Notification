@@ -239,3 +239,53 @@ def stop_openwa_session() -> dict:
 def send_test_whatsapp() -> dict:
     """Send a test message to the admin chat."""
     return send_test_message()
+
+
+@frappe.whitelist()
+def get_customer_ledger_pdf(customer: str) -> dict:
+    """Generate and return Customer Ledger PDF as base64 for remote fetch."""
+    from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
+    from erpnext.accounts.report.general_ledger.general_ledger import execute as get_gl
+    import base64
+
+    # Get customer name (could be name or customer_name)
+    customer_doc = frappe.get_cached_doc("Customer", customer)
+    customer_name = customer_doc.name
+    customer_display = customer_doc.customer_name
+
+    company = frappe.db.get_single_value("Global Defaults", "default_company")
+    filters = frappe._dict({
+        "company": company,
+        "from_date": frappe.utils.add_months(frappe.utils.today(), -12),
+        "to_date": frappe.utils.today(),
+        "party_type": "Customer",
+        "party": [customer_name],
+        "party_name": [customer_display],
+        "show_remarks": 0,
+        "categorize_by": "Categorize by Voucher (Consolidated)",
+        "show_opening_entries": 0,
+        "include_default_book_entries": 0,
+    })
+
+    columns, result = get_gl(filters)
+    if not result:
+        return {"success": False, "error": f"No ledger entries found for {customer_display}"}
+
+    letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
+
+    html = frappe.render_template(
+        "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
+        {"filters": filters, "data": result,
+         "report": {"report_name": "General Ledger", "columns": columns},
+         "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
+    )
+    from frappe.www.printview import get_print_style
+    full_html = frappe.render_template("frappe/www/printview.html", {
+        "body": html, "css": get_print_style(),
+        "title": f"Statement - {customer_display}"
+    })
+
+    pdf_bytes = generate_pdf_from_html(full_html, channel_name="WhatsApp - OpenWA")
+    base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    return {"success": True, "pdf_base64": base64_pdf, "filename": f"Statement_{customer_name}.pdf"}
