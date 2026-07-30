@@ -1,12 +1,13 @@
 """Inbound WhatsApp Webhook Handler — Unified Bot.
 
-Single bot handles: invoice requests, account ledger requests, and help text.
+Single bot handles configurable commands from WhatsApp Bot Command table.
 """
 import frappe
 import re
 import json
 import base64
 import time
+import requests
 from typing import Optional
 from frappe.utils import get_datetime, now_datetime
 
@@ -167,22 +168,8 @@ def process_incoming_message(payload: dict):
             _mark_chat_as_read(reply_to)
             return
 
-        # Try invoice keywords
-        invoice_identifier = _parse_invoice_reference(message_text, settings)
-        if invoice_identifier:
-            _handle_invoice_request(reply_to, invoice_identifier, employee_user_id)
-            _mark_chat_as_read(reply_to)
-            return
-
-        # Try ledger keywords
-        ledger_term = _parse_ledger_reference(message_text, settings)
-        if ledger_term:
-            _handle_ledger_request(reply_to, ledger_term, employee_user_id)
-            _mark_chat_as_read(reply_to)
-            return
-
-        # No keyword matched — send help
-        _send_text(reply_to, _get_help_text(settings))
+        # Route to bot commands (replaces hardcoded invoice/ledger)
+        _route_bot_commands(reply_to, message_text, employee_user_id)
         _mark_chat_as_read(reply_to)
 
     except Exception:
@@ -451,6 +438,216 @@ def _clear_conversation_state(chat_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Generic Bot Command Router
+# ---------------------------------------------------------------------------
+
+def _route_bot_commands(reply_to: str, message_text: str, employee_user_id: str):
+    """Route message to matching bot command (longest keyword wins)."""
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    if not settings.bot_commands:
+        _send_text(reply_to, _get_help_text(settings))
+        return
+
+    # Build list of commands user is authorized for
+    user_roles = frappe.get_roles(employee_user_id)
+    authorized_commands = []
+    for cmd in settings.bot_commands:
+        if not cmd.enabled:
+            continue
+        
+        # Check per-command allowed_roles if set
+        if cmd.allowed_roles:
+            allowed = [r.strip() for r in cmd.allowed_roles.split(",") if r.strip()]
+            if allowed and not any(role in user_roles for role in allowed):
+                continue  # Skip this command, user not authorized
+        
+        authorized_commands.append(cmd)
+
+    # Sort by keyword length descending (longest match first)
+    commands = sorted(
+        authorized_commands,
+        key=lambda c: len(c.command_keyword),
+        reverse=True,
+    )
+
+    for cmd in commands:
+        # Split comma-separated keywords (like old invoice_keywords/ledger_keywords)
+        keywords = [k.strip().lower() for k in cmd.command_keyword.split(",") if k.strip()]
+        if not keywords:
+            continue
+        
+        keyword_pattern = "|".join(re.escape(k) for k in keywords)
+        pattern = rf"(?i)({keyword_pattern})\s*[#:]*\s*(.+)"
+        match = re.search(pattern, message_text)
+        if match:
+            identifier = match.group(2).strip()
+            if identifier:
+                _handle_bot_command(cmd, reply_to, identifier, employee_user_id)
+                return
+
+    # No keyword matched — only send help if user explicitly asked for help
+    help_keywords = ["help", "menu", "commands", "सहायता"]
+    if any(message_text.strip().lower().startswith(kw) for kw in help_keywords):
+        _send_text(reply_to, _get_help_text(settings))
+    # Otherwise silently ignore (don't flood with help text)
+
+
+def _handle_bot_command(cmd, reply_to: str, identifier: str, employee_user_id: str):
+    """Generic handler for bot commands."""
+    try:
+        if cmd.fetch_type == "Document":
+            _handle_document_command(cmd, reply_to, identifier, employee_user_id)
+        elif cmd.fetch_type == "Report":
+            _handle_report_command(cmd, reply_to, identifier, employee_user_id)
+        else:
+            _send_text(reply_to, f"Unknown fetch type: {cmd.fetch_type}")
+    except Exception:
+        frappe.log_error(title=f"Bot Command Error: {cmd.command_keyword}", message=frappe.get_traceback())
+        _send_text(reply_to, "Failed to process request. Please try again later.")
+
+
+def _handle_document_command(cmd, reply_to: str, identifier: str, employee_user_id: str):
+    """Handle Document fetch type - lookup doc by search_field and send PDF."""
+    # Search for document locally only if not using remote API
+    if not cmd.api_link:
+        doc_name = _find_document(cmd, identifier)
+        if not doc_name:
+            _send_text(reply_to, f"{cmd.doc_type} '{identifier}' not found.")
+            return
+    else:
+        # For remote fetch, use identifier directly as doc_name
+        doc_name = identifier
+
+    original_user = frappe.session.user
+    try:
+        frappe.set_user(employee_user_id)
+
+        # Determine API target (local vs remote)
+        if cmd.api_link:
+            pdf_bytes = _fetch_remote_pdf(cmd, cmd.doc_type, doc_name)
+        else:
+            print_format = cmd.print_format or "Standard"
+            pdf_bytes = generate_pdf_bytes(cmd.doc_type, doc_name, print_format, channel_name="WhatsApp - OpenWA")
+
+        if isinstance(pdf_bytes, bytes):
+            base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+        else:
+            base64_pdf = pdf_bytes
+    except Exception:
+        frappe.set_user(original_user)
+        frappe.log_error(title=f"PDF Generation Failed for {cmd.doc_type} {doc_name}", message=frappe.get_traceback())
+        _send_text(reply_to, f"Failed to generate PDF for {doc_name}.")
+        return
+    finally:
+        frappe.set_user(original_user)
+
+    result = dispatch(
+        recipient=reply_to,
+        text=f"{cmd.doc_type}: {doc_name}",
+        file_b64=base64_pdf,
+        filename=f"{doc_name}.pdf",
+        mimetype="application/pdf",
+        message_type="Print PDF",
+        source_doctype=cmd.doc_type,
+        source_docname=doc_name,
+        source_print_format=cmd.print_format,
+        priority="Normal",
+    )
+
+    if result.get("success"):
+        reset_circuit_breaker()
+    else:
+        increment_circuit_breaker()
+
+
+def _handle_report_command(cmd, reply_to: str, identifier: str, employee_user_id: str):
+    """Handle Report fetch type - run report and send PDF."""
+    if cmd.doc_type == "Customer":
+        # Reuse existing ledger logic for Customer
+        _send_ledger_pdf(identifier, identifier, reply_to, employee_user_id)
+    else:
+        _send_text(reply_to, f"Report type not supported for {cmd.doc_type}")
+
+
+def _find_document(cmd, identifier: str) -> str | None:
+    """Find document by search_field with configurable docstatus."""
+    doctype = cmd.doc_type
+    search_field = cmd.search_field
+    
+    # Parse doc_status (comma-separated values like "1" or "0,1")
+    doc_status_str = cmd.get("doc_status", "1") or "1"
+    doc_status_values = [int(s.strip()) for s in doc_status_str.split(",") if s.strip().isdigit()]
+    if not doc_status_values:
+        doc_status_values = [1]  # Default to Submitted only
+    
+    # Build docstatus filter
+    if len(doc_status_values) == 1:
+        docstatus_filter = doc_status_values[0]
+    else:
+        docstatus_filter = doc_status_values
+
+    # Try exact match on search_field
+    filters = {search_field: identifier}
+    if isinstance(docstatus_filter, list):
+        # For multiple statuses, we need OR logic - use SQL
+        placeholders = ",".join(["%s"] * len(doc_status_values))
+        result = frappe.db.sql(
+            f"""SELECT name FROM `tab{doctype}` WHERE UPPER({search_field}) = UPPER(%s) AND docstatus IN ({placeholders}) LIMIT 1""",
+            (identifier, *doc_status_values),
+        )
+        if result:
+            return result[0][0]
+    else:
+        filters["docstatus"] = docstatus_filter
+        if frappe.db.exists(doctype, filters):
+            return identifier
+
+    # Try exact name match with docstatus filter
+    if isinstance(docstatus_filter, list):
+        placeholders = ",".join(["%s"] * len(doc_status_values))
+        result = frappe.db.sql(
+            f"""SELECT name FROM `tab{doctype}` WHERE UPPER(name) = UPPER(%s) AND docstatus IN ({placeholders}) LIMIT 1""",
+            (identifier, *doc_status_values),
+        )
+        if result:
+            return result[0][0]
+    else:
+        result = frappe.db.sql(
+            f"""SELECT name FROM `tab{doctype}` WHERE UPPER(name) = UPPER(%s) AND docstatus = %s LIMIT 1""",
+            (identifier, docstatus_filter),
+        )
+        if result:
+            return result[0][0]
+
+    return None
+
+
+def _fetch_remote_pdf(cmd, doctype: str, docname: str) -> bytes:
+    """Fetch PDF from remote Frappe instance."""
+    url = f"{cmd.api_link}/api/method/frappe.utils.print_format.download_pdf"
+    params = {"doctype": doctype, "name": docname}
+    if cmd.print_format:
+        params["format"] = cmd.print_format
+
+    headers = {}
+    if cmd.auth_type == "Token":
+        # Decrypt Password fields from child table
+        child_doc = frappe.get_doc("WhatsApp Bot Command", cmd.name)
+        api_key = child_doc.get_password("api_key")
+        api_password = child_doc.get_password("api_password")
+        headers["Authorization"] = f"token {api_key}:{api_password}"
+    elif cmd.auth_type == "Basic":
+        import base64 as b64
+        child_doc = frappe.get_doc("WhatsApp Bot Command", cmd.name)
+        api_password = child_doc.get_password("api_password")
+        headers["Authorization"] = f"Basic {b64.b64encode(api_password.encode()).decode()}"
+
+    r = requests.get(url, params=params, headers=headers, timeout=30)
+    r.raise_for_status()
+    return r.content
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -567,22 +764,30 @@ def _check_rate_limit(sender_chat_id: str) -> bool:
 
 
 def _get_help_text(settings=None) -> str:
-    if settings:
+    if not settings:
+        settings = frappe.get_cached_doc("OpenWA Settings")
+
+    lines = ["Bot Help\n"]
+    if settings.bot_commands:
+        for cmd in settings.bot_commands:
+            if cmd.enabled:
+                search_field = cmd.search_field or "name"
+                lines.append(f"  {cmd.command_keyword} <{search_field}> — {cmd.doc_type}")
+                if cmd.remarks:
+                    lines.append(f"    {cmd.remarks}")
+    else:
+        # Fallback to old keywords if no bot commands configured
         inv_kw = settings.invoice_keywords or DEFAULT_INVOICE_KEYWORDS
         ledger_kw = settings.ledger_keywords or DEFAULT_LEDGER_KEYWORDS
-    else:
-        inv_kw = DEFAULT_INVOICE_KEYWORDS
-        ledger_kw = DEFAULT_LEDGER_KEYWORDS
+        lines.append(f"  Invoice: {', '.join(inv_kw.split(','))} <invoice_number>")
+        lines.append(f"  Ledger: {', '.join(ledger_kw.split(','))} <customer_name>")
 
-    return (
-        "Bot Help\n\n"
-        f"Invoice: {', '.join(inv_kw.split(','))} <invoice_number>\n"
-        f"Ledger: {', '.join(ledger_kw.split(','))} <customer_name>\n\n"
-        "Examples:\n"
-        "• invoice KG/2627/307\n"
-        "• ledger Kreativ\n\n"
-        "Only submitted invoices can be retrieved."
-    )
+    lines.append("\nExamples:")
+    lines.append("  • invoice KG/2627/307")
+    lines.append("  • ledger Kreativ")
+    lines.append("\nOnly submitted documents can be retrieved.")
+
+    return "\n".join(lines)
 
 
 def check_inbound_webhook_health():

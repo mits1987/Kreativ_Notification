@@ -20,6 +20,8 @@
     "invoice_keywords",
     "ledger_keywords",
     "invoice_print_format",
+    "bot_commands_section",
+    "bot_commands",
     "section_break_session",
     "session_status",
     "session_qr",
@@ -100,37 +102,53 @@
     },
     {
       "default": "0",
-      "description": "Automatically reply to invoice requests from authorised employees",
+      "description": "Enable the WhatsApp bot to automatically reply to configured commands (invoice, ledger, etc.). Acts as master toggle for all bot commands.",
       "fieldname": "auto_reply_enabled",
       "fieldtype": "Check",
-      "label": "Auto-Reply Enabled"
+      "label": "Bot Enabled"
     },
     {
       "description": "Comma-separated list of roles allowed to use the auto-reply bot. Leave empty to allow all active employees. Example: Sales Manager,Sales User,Marketing User",
       "fieldname": "allowed_roles",
       "fieldtype": "Small Text",
-      "label": "Allowed Roles"
+      "label": "Allowed Roles (DEPRECATED - use Bot Commands table)",
+      "hidden": 1
     },
     {
       "default": "invoice,inv,\u092c\u093f\u0932",
-      "description": "Comma-separated keywords that trigger invoice PDF fetch (case-insensitive).",
+      "description": "Comma-separated keywords that trigger invoice PDF fetch (case-insensitive). DEPRECATED - use Bot Commands table.",
       "fieldname": "invoice_keywords",
       "fieldtype": "Data",
-      "label": "Invoice Keywords"
+      "label": "Invoice Keywords (DEPRECATED)",
+      "hidden": 1
     },
     {
       "default": "ledger,statement,account,balance,\u092c\u0939\u0940",
-      "description": "Comma-separated keywords that trigger customer ledger fetch (case-insensitive).",
+      "description": "Comma-separated keywords that trigger customer ledger fetch (case-insensitive). DEPRECATED - use Bot Commands table.",
       "fieldname": "ledger_keywords",
       "fieldtype": "Data",
-      "label": "Ledger Keywords"
+      "label": "Ledger Keywords (DEPRECATED)",
+      "hidden": 1
     },
     {
-      "description": "Print format to use for Invoice PDF replies. Leave blank for default.",
+      "description": "Print format to use for Invoice PDF replies. Leave blank for default. DEPRECATED - use Bot Commands table.",
       "fieldname": "invoice_print_format",
       "fieldtype": "Link",
-      "label": "Invoice Print Format",
-      "options": "Print Format"
+      "label": "Invoice Print Format (DEPRECATED)",
+      "options": "Print Format",
+      "hidden": 1
+    },
+    {
+      "fieldname": "bot_commands_section",
+      "fieldtype": "Section Break",
+      "label": "Bot Commands"
+    },
+    {
+      "fieldname": "bot_commands",
+      "fieldtype": "Table",
+      "label": "Bot Commands",
+      "options": "WhatsApp Bot Command",
+      "description": "Configure which commands the WhatsApp bot responds to. Longer keywords match first."
     },
     {
       "fieldname": "section_break_session",

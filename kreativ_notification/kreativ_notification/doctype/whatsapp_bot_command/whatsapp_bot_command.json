@@ -1,0 +1,150 @@
+{
+	"actions": [],
+	"creation": "2026-07-29 00:00:00.000000",
+	"doctype": "DocType",
+	"editable_grid": 1,
+	"engine": "InnoDB",
+	"field_order": [
+		"enabled",
+		"command_keyword",
+		"doc_type",
+		"print_format",
+		"fetch_type",
+		"doc_status",
+		"column_break_auth",
+		"auth_type",
+		"search_field",
+		"section_access",
+		"allowed_roles",
+		"section_api",
+		"api_link",
+		"api_key",
+		"api_password",
+		"column_break_api",
+		"remarks"
+	],
+	"fields": [
+		{
+			"fieldname": "enabled",
+			"fieldtype": "Check",
+			"label": "Enabled",
+			"default": 1,
+			"in_list_view": 1
+		},
+		{
+			"fieldname": "command_keyword",
+			"fieldtype": "Data",
+			"label": "Command Keyword",
+			"reqd": 1,
+			"in_list_view": 1,
+			"description": "What user types, e.g. 'invoice tally', 'ledger'. Multiple keywords: 'invoice,inv,bill,बिल'"
+		},
+		{
+			"fieldname": "doc_type",
+			"fieldtype": "Link",
+			"label": "DocType",
+			"options": "DocType",
+			"reqd": 1,
+			"in_list_view": 1
+		},
+		{
+			"fieldname": "print_format",
+			"fieldtype": "Link",
+			"label": "Print Format",
+			"options": "Print Format",
+			"in_list_view": 1,
+			"description": "Filtered by DocType above"
+		},
+		{
+			"fieldname": "fetch_type",
+			"fieldtype": "Select",
+			"label": "Fetch Type",
+			"options": "Document\nReport",
+			"default": "Document",
+			"reqd": 1,
+			"in_list_view": 1
+		},
+		{
+			"fieldname": "doc_status",
+			"fieldtype": "Data",
+			"label": "Document Status",
+			"default": "Submitted",
+			"in_list_view": 1,
+			"description": "Comma-separated docstatus values: 0=Draft, 1=Submitted, 2=Cancelled. Example: '0,1' for Draft and Submitted. Leave as '1' for Submitted only."
+		},
+		{
+			"fieldname": "column_break_auth",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "auth_type",
+			"fieldtype": "Select",
+			"label": "Auth Type",
+			"options": "None\nToken\nBasic",
+			"default": "None",
+			"reqd": 1,
+			"in_list_view": 1
+		},
+		{
+			"fieldname": "search_field",
+			"fieldtype": "Data",
+			"label": "Search Field",
+			"default": "name",
+			"description": "Field to match identifier against, e.g. 'name', 'customer_name'"
+		},
+		{
+			"fieldname": "section_access",
+			"fieldtype": "Section Break",
+			"label": "Access Control"
+		},
+		{
+			"fieldname": "allowed_roles",
+			"fieldtype": "Small Text",
+			"label": "Allowed Roles",
+			"description": "Comma-separated list of roles allowed to use this command. Leave empty to allow all active employees. Example: Sales Manager,Sales User,Marketing User"
+		},
+		{
+			"fieldname": "section_api",
+			"fieldtype": "Section Break",
+			"label": "Remote API (leave blank for local site)"
+		},
+		{
+			"fieldname": "api_link",
+			"fieldtype": "Data",
+			"label": "API Link",
+			"description": "e.g. http://localhost:86 -- blank = local site"
+		},
+		{
+			"fieldname": "api_key",
+			"fieldtype": "Password",
+			"label": "API Key",
+			"description": "For Token auth: token api_key:api_secret"
+		},
+		{
+			"fieldname": "api_password",
+			"fieldtype": "Password",
+			"label": "API Password",
+			"description": "For Token auth = api_secret. For Basic auth = password"
+		},
+		{
+			"fieldname": "column_break_api",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "remarks",
+			"fieldtype": "Small Text",
+			"label": "Remarks",
+			"description": "Notes about this command (internal use)"
+		}
+	],
+	"istable": 1,
+	"links": [],
+	"modified": "2026-07-30 00:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "kreativ_notification",
+	"name": "WhatsApp Bot Command",
+	"owner": "Administrator",
+	"permissions": [],
+	"sort_field": "modified",
+	"sort_order": "DESC"
+}
