@@ -703,18 +703,20 @@ def _fetch_remote_ledger_pdf(cmd, customer_name: str, reply_to: str, employee_us
     try:
         r = requests.get(url, params=params, headers=headers, timeout=60)
         r.raise_for_status()
-        pdf_bytes = r.content
+        # Remote API returns JSON wrapped in "message" key by Frappe
+        response_json = r.json()
+        message = response_json.get("message", response_json)  # Handle both wrapped and direct
+        if not message.get("success"):
+            raise Exception(message.get("error", "Remote API returned error"))
 
-        if isinstance(pdf_bytes, bytes):
-            base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-        else:
-            base64_pdf = pdf_bytes
+        base64_pdf = message.get("pdf_base64")
+        filename = message.get("filename", f"Statement_{customer_name}.pdf")
 
         result = dispatch(
             recipient=reply_to,
             text=f"Customer Ledger: {customer_name}",
             file_b64=base64_pdf,
-            filename=f"Statement_{customer_name}.pdf",
+            filename=filename,
             mimetype="application/pdf",
             message_type="Print PDF",
             source_doctype="Customer",
