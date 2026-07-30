@@ -102,14 +102,12 @@ patches = [
     "kreativ_notification.patches.v16_0.add_platform_fields_to_send_log",
     "kreativ_notification.patches.v16_0.production_defaults",
     "kreativ_notification.patches.v16_0.fix_checkin_label_and_openwa_defaults",
+    "kreativ_notification.patches.v16_0.seed_bot_commands",
 ]
 
-# Fixtures — ship the default rules/templates that replace the old
-# hardcoded Salary Slip + Employee Checkin behavior
+# Fixtures — ship the default bot commands and custom field
 fixtures = [
-    {"dt": "Message Template", "filters": [["module", "=", "kreativ_notification"]]},
-    {"dt": "Notification Rule", "filters": [["module", "=", "kreativ_notification"]]},
-    {"dt": "WhatsApp Send Log"},
+    {"dt": "WhatsApp Bot Command"},
     {"dt": "Custom Field", "filters": [["fieldname", "=", "whatsapp_sent"], ["dt", "=", "Employee Checkin"]]},
 ]
 
