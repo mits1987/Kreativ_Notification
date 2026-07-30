@@ -93,6 +93,7 @@ def _generate_pdf_from_html(html: str, channel_name: str = None) -> bytes:
                 "--headless=new",
                 "--no-sandbox",
                 "--disable-gpu",
+                "--no-pdf-header-footer",
                 "--print-to-pdf=" + pdf_path,
                 f"file://{html_path}",
             ],

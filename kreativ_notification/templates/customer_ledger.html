@@ -146,15 +146,8 @@
     <!-- Report title below logo -->
     <div class="report-header">
         <div class="report-title">
-            <h2>Customer Statement</h2>
+            <h2>{{ customer_name.upper() }} STATEMENT</h2>
             <div class="period">Period: {{ from_date }} to {{ to_date }}</div>
-        </div>
-    </div>
-
-    <div class="customer-info">
-        <div class="field">
-            <strong>Customer</strong>
-            <span>{{ customer_name }}</span>
         </div>
     </div>
 
