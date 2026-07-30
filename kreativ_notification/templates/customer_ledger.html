@@ -29,6 +29,9 @@
             font-weight: bold;
             color: #1a1a1a;
             margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .company-address {
             font-size: 8pt;
@@ -39,16 +42,23 @@
         .report-title {
             text-align: right;
             flex: 1;
+            min-width: 200px;
         }
         .report-title h2 {
             margin: 0;
             font-size: 14pt;
             color: #1a1a1a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .report-title .period {
             font-size: 8pt;
             color: #666;
             margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .customer-info {
             margin-top: 10px;
@@ -77,13 +87,12 @@
             text-align: center;
             white-space: nowrap;
         }
-        .col-date { width: 8%; text-align: center; }
-        .col-voucher { width: 14%; text-align: center; }
-        .col-voucher-type { width: 12%; text-align: center; }
-        .col-debit { width: 14%; text-align: right; }
-        .col-credit { width: 14%; text-align: right; }
-        .col-balance { width: 14%; text-align: right; font-weight: bold; }
-        .col-particulars { width: 24%; text-align: left; font-size: 7.5pt; }
+        .col-date { width: 10%; text-align: center; }
+        .col-voucher { width: 18%; text-align: center; }
+        .col-voucher-type { width: 14%; text-align: center; }
+        .col-debit { width: 16%; text-align: right; }
+        .col-credit { width: 16%; text-align: right; }
+        .col-balance { width: 16%; text-align: right; font-weight: bold; }
         tr.total-row td {
             font-weight: bold;
             background: #f9f9f9;
@@ -99,9 +108,7 @@
             color: #888;
             border-top: 1px solid #eee;
             padding-top: 8px;
-        }
-        .page-number:before {
-            content: counter(page);
+            display: none;
         }
         .currency {
             white-space: nowrap;
@@ -148,7 +155,6 @@
                 <th class="col-debit">Debit</th>
                 <th class="col-credit">Credit</th>
                 <th class="col-balance">Balance</th>
-                <th class="col-particulars">Particulars</th>
             </tr>
         </thead>
         <tbody>
@@ -172,7 +178,6 @@
                     <td class="col-balance {% if row.balance < 0 %}dr{% elif row.balance > 0 %}cr{% else %}zero{% endif %} dr-cr">
                         {{ frappe.utils.fmt_money(row.balance, currency=company_currency) }}
                     </td>
-                    <td class="col-particulars">{{ row.against or '' }}</td>
                 </tr>
             {% endfor %}
         </tbody>
