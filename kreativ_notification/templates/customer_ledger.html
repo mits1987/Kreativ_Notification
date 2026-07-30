@@ -9,76 +9,90 @@
         }
         body {
             font-family: "DejaVu Sans", "Noto Sans", Arial, sans-serif;
-            font-size: 9pt;
+            font-size: 8.5pt;
             color: #222;
-            line-height: 1.3;
+            line-height: 1.25;
         }
+        /* Header: company logo only */
         .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
             margin-bottom: 15px;
             border-bottom: 2px solid #333;
             padding-bottom: 10px;
         }
         .company-info {
-            flex: 1;
+            text-align: left;
         }
         .company-name {
-            font-size: 16pt;
+            font-size: 14pt;
             font-weight: bold;
             color: #1a1a1a;
             margin: 0;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
         .company-address {
-            font-size: 8pt;
+            font-size: 7pt;
             color: #555;
-            margin: 2px 0 0;
-            line-height: 1.2;
+            margin: 1px 0 0;
+            line-height: 1.1;
+        }
+
+        /* Report title below logo */
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-top: 15px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         .report-title {
-            text-align: right;
-            flex: 1;
-            min-width: 200px;
+            text-align: left;
         }
         .report-title h2 {
             margin: 0;
             font-size: 14pt;
             color: #1a1a1a;
             white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
         .report-title .period {
             font-size: 8pt;
             color: #666;
-            margin-top: 4px;
+            margin-top: 2px;
             white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
+        
         .customer-info {
             margin-top: 10px;
-            padding: 8px 12px;
+            padding: 6px 10px;
             background: #f5f5f5;
-            border-radius: 4px;
-            font-size: 9pt;
+            border-radius: 3px;
+            font-size: 8pt;
+            display: flex;
+            gap: 20px;
+        }
+        .customer-info .field {
+            display: flex;
+            flex-direction: column;
         }
         .customer-info strong {
             color: #333;
+            font-weight: bold;
+            font-size: 7pt;
         }
+        .customer-info span {
+            color: #222;
+            font-size: 8pt;
+        }
+        
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 12px;
-            font-size: 8pt;
+            margin-top: 10px;
+            font-size: 7.5pt;
         }
         th, td {
             border: 1px solid #ddd;
-            padding: 4px 6px;
+            padding: 3px 4px;
             vertical-align: top;
         }
         th {
@@ -87,28 +101,24 @@
             text-align: center;
             white-space: nowrap;
         }
-        .col-date { width: 10%; text-align: center; }
-        .col-voucher { width: 18%; text-align: center; }
-        .col-voucher-type { width: 14%; text-align: center; }
+        .col-date { width: 11%; text-align: center; }
+        .col-voucher { width: 16%; text-align: center; }
+        .col-voucher-type { width: 13%; text-align: center; }
         .col-debit { width: 16%; text-align: right; }
         .col-credit { width: 16%; text-align: right; }
         .col-balance { width: 16%; text-align: right; font-weight: bold; }
-        tr.total-row td {
-            font-weight: bold;
-            background: #f9f9f9;
-        }
+        .col-particulars { width: 25%; text-align: left; font-size: 7pt; }
         tr.opening-row td {
             background: #f0f0f0;
             font-weight: bold;
         }
         .footer {
-            margin-top: 20px;
+            margin-top: 15px;
             text-align: center;
-            font-size: 7pt;
+            font-size: 6pt;
             color: #888;
             border-top: 1px solid #eee;
-            padding-top: 8px;
-            display: none;
+            padding-top: 6px;
         }
         .currency {
             white-space: nowrap;
@@ -116,14 +126,12 @@
         .zero {
             color: #999;
         }
-        .dr-cr {
-            font-weight: bold;
-        }
         .dr { color: #c00; }
         .cr { color: #080; }
     </style>
 </head>
 <body>
+    <!-- Header: only company logo from letterhead -->
     <div class="header">
         <div class="company-info">
             {% if letter_head and letter_head.content %}
@@ -133,17 +141,25 @@
                 <p class="company-address">{{ company_address }}</p>
             {% endif %}
         </div>
+    </div>
+
+    <!-- Report title below logo -->
+    <div class="report-header">
         <div class="report-title">
             <h2>Customer Statement</h2>
-            <div class="period">
-                Period: {{ from_date }} to {{ to_date }}
-            </div>
+            <div class="period">Period: {{ from_date }} to {{ to_date }}</div>
         </div>
     </div>
 
     <div class="customer-info">
-        <strong>Customer:</strong> {{ customer_name }}<br>
-        <strong>Account:</strong> {{ customer }}
+        <div class="field">
+            <strong>Customer</strong>
+            <span>{{ customer_name }}</span>
+        </div>
+        <div class="field">
+            <strong>Account</strong>
+            <span>{{ customer }}</span>
+        </div>
     </div>
 
     <table>
@@ -159,7 +175,7 @@
         </thead>
         <tbody>
             {% for row in data %}
-                <tr class="{{ 'opening-row' if row.is_opening == 'Yes' else ('total-row' if row.is_total_row else '') }}">
+                <tr class="{{ 'opening-row' if row.is_opening == 'Yes' else '' }}">
                     <td class="col-date">{{ row.posting_date or '' }}</td>
                     <td class="col-voucher">
                         {% if row.voucher_no %}
@@ -169,13 +185,13 @@
                         {% endif %}
                     </td>
                     <td class="col-voucher-type">{{ row.voucher_type or '' }}</td>
-                    <td class="col-debit {% if row.debit > 0 %}dr{% elif row.debit == 0 %}zero{% endif %} dr-cr">
+                    <td class="col-debit {% if row.debit > 0 %}dr{% elif row.debit == 0 %}zero{% endif %}">
                         {% if row.debit > 0 %}{{ frappe.utils.fmt_money(row.debit, currency=company_currency) }}{% else %}-{% endif %}
                     </td>
-                    <td class="col-credit {% if row.credit > 0 %}cr{% elif row.credit == 0 %}zero{% endif %} dr-cr">
+                    <td class="col-credit {% if row.credit > 0 %}cr{% elif row.credit == 0 %}zero{% endif %}">
                         {% if row.credit > 0 %}{{ frappe.utils.fmt_money(row.credit, currency=company_currency) }}{% else %}-{% endif %}
                     </td>
-                    <td class="col-balance {% if row.balance < 0 %}dr{% elif row.balance > 0 %}cr{% else %}zero{% endif %} dr-cr">
+                    <td class="col-balance {% if row.balance < 0 %}dr{% elif row.balance > 0 %}cr{% else %}zero{% endif %}">
                         {{ frappe.utils.fmt_money(row.balance, currency=company_currency) }}
                     </td>
                 </tr>
@@ -184,8 +200,7 @@
     </table>
 
     <div class="footer">
-        Generated on {{ frappe.utils.format_datetime(frappe.utils.now(), 'dd-MM-yyyy HH:mm') }} |
-        This is a computer-generated statement.
+        Generated on {{ frappe.utils.format_datetime(frappe.utils.now(), 'dd-MM-yyyy HH:mm') }}
     </div>
 </body>
 </html>
