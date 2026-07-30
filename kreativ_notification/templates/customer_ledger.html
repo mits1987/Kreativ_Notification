@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        @page {
+            margin: 15mm 10mm;
+            size: A4;
+        }
+        body {
+            font-family: "DejaVu Sans", "Noto Sans", Arial, sans-serif;
+            font-size: 9pt;
+            color: #222;
+            line-height: 1.3;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+        }
+        .company-info {
+            flex: 1;
+        }
+        .company-name {
+            font-size: 16pt;
+            font-weight: bold;
+            color: #1a1a1a;
+            margin: 0;
+        }
+        .company-address {
+            font-size: 8pt;
+            color: #555;
+            margin: 2px 0 0;
+            line-height: 1.2;
+        }
+        .report-title {
+            text-align: right;
+            flex: 1;
+        }
+        .report-title h2 {
+            margin: 0;
+            font-size: 14pt;
+            color: #1a1a1a;
+        }
+        .report-title .period {
+            font-size: 8pt;
+            color: #666;
+            margin-top: 4px;
+        }
+        .customer-info {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            font-size: 9pt;
+        }
+        .customer-info strong {
+            color: #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            font-size: 8pt;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 4px 6px;
+            vertical-align: top;
+        }
+        th {
+            background: #f0f0f0;
+            font-weight: bold;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .col-date { width: 7%; text-align: center; }
+        .col-voucher { width: 12%; text-align: center; }
+        .col-voucher-type { width: 10%; text-align: center; }
+        .col-debit { width: 12%; text-align: right; }
+        .col-credit { width: 12%; text-align: right; }
+        .col-balance { width: 12%; text-align: right; font-weight: bold; }
+        .col-remarks { width: 18%; text-align: left; font-size: 7.5pt; }
+        .col-party { width: 15%; text-align: left; }
+        .col-particulars { width: 12%; text-align: left; font-size: 7.5pt; }
+        tr.total-row td {
+            font-weight: bold;
+            background: #f9f9f9;
+        }
+        tr.opening-row td {
+            background: #f0f0f0;
+            font-weight: bold;
+        }
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 7pt;
+            color: #888;
+            border-top: 1px solid #eee;
+            padding-top: 8px;
+        }
+        .page-number:before {
+            content: counter(page);
+        }
+        .currency {
+            white-space: nowrap;
+        }
+        .zero {
+            color: #999;
+        }
+        .dr-cr {
+            font-weight: bold;
+        }
+        .dr { color: #c00; }
+        .cr { color: #080; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="company-info">
+            {% if letter_head and letter_head.content %}
+                {{ letter_head.content | safe }}
+            {% else %}
+                <p class="company-name">{{ company_name }}</p>
+                <p class="company-address">{{ company_address }}</p>
+            {% endif %}
+        </div>
+        <div class="report-title">
+            <h2>Customer Statement</h2>
+            <div class="period">
+                Period: {{ from_date }} to {{ to_date }}
+            </div>
+        </div>
+    </div>
+
+    <div class="customer-info">
+        <strong>Customer:</strong> {{ customer_name }}<br>
+        <strong>Account:</strong> {{ customer }}
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th class="col-date">Date</th>
+                <th class="col-voucher">Voucher No</th>
+                <th class="col-voucher-type">Voucher Type</th>
+                <th class="col-debit">Debit</th>
+                <th class="col-credit">Credit</th>
+                <th class="col-balance">Balance</th>
+                <th class="col-remarks">Remarks</th>
+                <th class="col-party">Party</th>
+                <th class="col-particulars">Particulars</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in data %}
+                <tr class="{{ 'opening-row' if row.is_opening == 'Yes' else ('total-row' if row.is_total_row else '') }}">
+                    <td class="col-date">{{ row.posting_date or '' }}</td>
+                    <td class="col-voucher">
+                        {% if row.voucher_no %}
+                            <strong>{{ row.voucher_no }}</strong>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td class="col-voucher-type">{{ row.voucher_type or '' }}</td>
+                    <td class="col-debit {% if row.debit > 0 %}dr{% elif row.debit == 0 %}zero{% endif %} dr-cr">
+                        {% if row.debit > 0 %}{{ frappe.utils.fmt_money(row.debit, currency=company_currency) }}{% else %}-{% endif %}
+                    </td>
+                    <td class="col-credit {% if row.credit > 0 %}cr{% elif row.credit == 0 %}zero{% endif %} dr-cr">
+                        {% if row.credit > 0 %}{{ frappe.utils.fmt_money(row.credit, currency=company_currency) }}{% else %}-{% endif %}
+                    </td>
+                    <td class="col-balance {% if row.balance < 0 %}dr{% elif row.balance > 0 %}cr{% else %}zero{% endif %} dr-cr">
+                        {{ frappe.utils.fmt_money(row.balance, currency=company_currency) }}
+                    </td>
+                    <td class="col-remarks">{{ row.remarks or '' }}</td>
+                    <td class="col-party">{{ row.party or '' }}</td>
+                    <td class="col-particulars">{{ row.particulars or '' }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="footer">
+        Generated on {{ frappe.utils.format_datetime(frappe.utils.now(), 'dd-MM-yyyy HH:mm') }} |
+        This is a computer-generated statement.
+    </div>
+</body>
+</html>

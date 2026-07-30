@@ -255,6 +255,9 @@ def get_customer_ledger_pdf(customer: str) -> dict:
     customer_display = customer_doc.customer_name
 
     company = frappe.db.get_single_value("Global Defaults", "default_company")
+    company_doc = frappe.get_cached_doc("Company", company)
+    company_currency = company_doc.default_currency
+
     filters = frappe._dict({
         "company": company,
         "from_date": frappe.utils.add_months(frappe.utils.today(), -12),
@@ -264,7 +267,7 @@ def get_customer_ledger_pdf(customer: str) -> dict:
         "party_name": [customer_display],
         "show_remarks": 0,
         "categorize_by": "Categorize by Voucher (Consolidated)",
-        "show_opening_entries": 0,
+        "show_opening_entries": 1,
         "include_default_book_entries": 0,
     })
 
@@ -272,21 +275,29 @@ def get_customer_ledger_pdf(customer: str) -> dict:
     if not result:
         return {"success": False, "error": f"No ledger entries found for {customer_display}"}
 
+    # Get default letterhead
     letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
 
     html = frappe.render_template(
-        "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
-        {"filters": filters, "data": result,
-         "report": {"report_name": "General Ledger", "columns": columns},
-         "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
+        "kreativ_notification/templates/customer_ledger.html",
+        {
+            "filters": filters,
+            "data": result,
+            "report": {"report_name": "General Ledger", "columns": columns},
+            "ageing": None,
+            "letter_head": letter_head,
+            "terms_and_conditions": None,
+            "company_name": company_doc.name,
+            "company_address": company_doc.get("address", "") or "",
+            "customer_name": customer_display,
+            "customer": customer_name,
+            "from_date": frappe.format(filters.from_date, "Date"),
+            "to_date": frappe.format(filters.to_date, "Date"),
+            "company_currency": company_currency,
+        }
     )
-    from frappe.www.printview import get_print_style
-    full_html = frappe.render_template("frappe/www/printview.html", {
-        "body": html, "css": get_print_style(),
-        "title": f"Statement - {customer_display}"
-    })
 
-    pdf_bytes = generate_pdf_from_html(full_html, channel_name="WhatsApp - OpenWA")
+    pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
     base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
     return {"success": True, "pdf_base64": base64_pdf, "filename": f"Statement_{customer_name}.pdf"}
