@@ -163,8 +163,9 @@ def send_print_pdf_whatsapp(
     from kreativ_notification.notification.pdf_utils import generate_pdf_bytes
     import base64
 
-    settings = frappe.get_cached_doc("OpenWA Settings")
-    resolved_print_format = print_format or settings.invoice_print_format or "Standard"
+    # Use the print_format passed from print preview, fallback to "Standard"
+    # Do NOT use deprecated invoice_print_format field
+    resolved_print_format = print_format or "Standard"
 
     pdf_bytes = generate_pdf_bytes(doctype, doc_name, resolved_print_format, channel_name="WhatsApp - OpenWA")
     if isinstance(pdf_bytes, bytes):

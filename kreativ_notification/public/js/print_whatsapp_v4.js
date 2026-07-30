@@ -496,11 +496,37 @@
 
     function getPrintFormat() {
         try {
-            var $pf = $("input[data-fieldname='print_format']:visible").first();
-            if ($pf.length) return $pf.val() || null;
-            var $pfHidden = $("input[data-fieldname='print_format']").first();
-            return $pfHidden.length ? $pfHidden.val() || null : null;
-        } catch (e) { return null; }
+            // Try multiple selectors for the print format dropdown on print preview page
+            var selectors = [
+                "input[data-fieldname='print_format']:visible",
+                "select[data-fieldname='print_format']:visible",
+                "input[data-fieldname='print_format']",
+                "select[data-fieldname='print_format']",
+                // Sometimes it's in a custom control wrapper
+                ".print-format-select:visible",
+                ".print-format-select"
+            ];
+            
+            for (var i = 0; i < selectors.length; i++) {
+                var $el = $(selectors[i]).first();
+                if ($el.length) {
+                    var val = $el.val();
+                    if (val && val !== "Standard") {
+                        return val;
+                    }
+                }
+            }
+            
+            // Try to get from the print preview's internal state
+            if (window.cur_print_format) {
+                return window.cur_print_format;
+            }
+            
+            return null;
+        } catch (e) { 
+            console.error('[print_whatsapp] getPrintFormat error:', e);
+            return null; 
+        }
     }
 
     function getLanguage() {
@@ -590,7 +616,7 @@ function hasWhatsAppPermission() {
 
    Strategy: keep a single persistent timer that checks every
    3000ms whether we're on a print page and whether our button
-   is present. If not, inject.  The interval never stops, so
+   is present. If not, inject. The interval never stops, so
    it catches first navigation AND refresh equally.
 
    The route guard (`route[0] === "print"`) prevents injection
@@ -618,10 +644,18 @@ function hasWhatsAppPermission() {
     function startInjector() {
         try {
             var injectTimer = null;
+            var initialDelays = [100, 500, 1000, 2000]; // Fast initial checks
+            var initialIndex = 0;
 
             function tryInject() {
                 if (!isPrintRoute()) return;
-                injectIntoToolbar();
+                if (injectIntoToolbar()) {
+                    // Button injected successfully, continue with periodic check
+                    if (initialIndex < initialDelays.length) {
+                        initialIndex++;
+                        setTimeout(tryInject, initialDelays[initialIndex - 1]);
+                    }
+                }
             }
 
             // Wait for Frappe to be ready, then start the
@@ -631,6 +665,11 @@ function hasWhatsAppPermission() {
                     setTimeout(onFrappeReady, 100);
                     return;
                 }
+
+                // Run initial fast checks
+                initialDelays.forEach(function(d, i) {
+                    setTimeout(tryInject, d);
+                });
 
                 // Persistent check — runs every 3s, catches all scenarios.
                 injectTimer = setInterval(tryInject, 3000);
@@ -653,7 +692,7 @@ function hasWhatsAppPermission() {
 
             onFrappeReady();
         } catch (e) {
-            console.error('[print_whatsapp_v3] startInjector error:', e);
+            console.error('[print_whatsapp_v4] startInjector error:', e);
         }
     };
     startInjector();
