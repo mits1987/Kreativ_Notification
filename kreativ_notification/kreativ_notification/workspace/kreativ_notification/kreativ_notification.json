@@ -1,0 +1,66 @@
+{
+ "app": "kreativ_notification",
+ "charts": [],
+ "content": "[{\"type\": \"card\", \"data\": {\"card_name\": \"OpenWA Session\", \"label\": \"OpenWA Session\", \"col\": 6, \"link\": \"Form/OpenWA Settings\", \"icon\": \"message-square\", \"color\": \"#1f77b4\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"WhatsApp Bot Commands\", \"label\": \"WhatsApp Bot Commands\", \"col\": 6, \"link\": \"List/WhatsApp Bot Command\", \"icon\": \"bot\", \"color\": \"#ff7f0e\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Send Logs\", \"label\": \"WhatsApp Send Logs\", \"col\": 6, \"link\": \"List/WhatsApp Send Log\", \"icon\": \"send\", \"color\": \"#2ca02c\"}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Dispatch Screenshots\", \"label\": \"Dispatch Screenshots\", \"col\": 6, \"link\": \"Report/Dispatch Register\", \"icon\": \"image\", \"color\": \"#d62728\"}}]",
+ "creation": "2026-07-31 19:02:07.950812",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "message-square",
+ "idx": 0,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "Kreativ Notification",
+ "link_type": "DocType",
+ "links": [],
+ "modified": "2026-07-31 19:22:36.277773",
+ "modified_by": "Administrator",
+ "module": "kreativ_notification",
+ "name": "Kreativ Notification",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "WhatsApp Send Logs",
+   "link_to": "WhatsApp Send Log",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "OpenWA Settings",
+   "link_to": "OpenWA Settings",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Bot Commands",
+   "link_to": "WhatsApp Bot Command",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Notification Rules",
+   "link_to": "Notification Rule",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Message Templates",
+   "link_to": "Message Template",
+   "type": "DocType"
+  }
+ ],
+ "title": "Kreativ Notification",
+ "type": "Workspace"
+}
