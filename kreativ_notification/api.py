@@ -275,6 +275,9 @@ def get_customer_ledger_pdf(customer: str) -> dict:
     if not result:
         return {"success": False, "error": f"No ledger entries found for {customer_display}"}
 
+    # Filter out only the Closing row from GL report (keep Total row)
+    result = [r for r in result if not (r.get("account") == "'Closing (Opening + Total)'")]
+
     # Get default letterhead
     letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
 
