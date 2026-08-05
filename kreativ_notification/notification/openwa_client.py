@@ -187,13 +187,53 @@ class OpenWAClient:
             _log_error("OpenWA exception", frappe.get_traceback())
             return self._classify_error("Unexpected error — check Error Log: {0}".format(e))
 
+    # ------------------------------------------------------------------
+    # LID Resolution — pre-resolve @c.us → @lid before sending
+    # ------------------------------------------------------------------
+
+    def _resolve_chat_id(self, chat_id: str) -> str:
+        """Resolve @c.us to @lid if WhatsApp has migrated the contact.
+
+        OpenWA v0.13.0's internal resolveSendId fails with "No LID for user"
+        for migrated contacts. We bypass this by calling /contacts/check/{phone}
+        which returns the correct @lid format.
+        """
+        if not chat_id or not chat_id.endswith("@c.us"):
+            return chat_id
+
+        phone = chat_id.split("@")[0]
+        cache_key = "openwa_lid:{}:{}".format(frappe.local.site, phone)
+
+        cached = frappe.cache().get_value(cache_key)
+        if cached is not None:
+            return cached if cached else chat_id
+
+        try:
+            url = "{}/api/sessions/{}/contacts/check/{}".format(
+                self.base_url, self.session_id, phone
+            )
+            r = _get_session().get(url, headers={"X-API-Key": self.api_key}, timeout=10)
+            if r.ok:
+                data = r.json()
+                lid = data.get("whatsappId", "")
+                if lid and lid.endswith("@lid"):
+                    frappe.cache().set_value(cache_key, lid, expires_in_sec=86400)
+                    return lid
+        except Exception:
+            pass
+
+        frappe.cache().set_value(cache_key, "", expires_in_sec=3600)
+        return chat_id
+
     def send_text(self, chat_id: str, text: str) -> dict:
-        return self._post("send-text", {"chatId": chat_id, "text": text})
+        resolved = self._resolve_chat_id(chat_id)
+        return self._post("send-text", {"chatId": resolved, "text": text})
 
     def send_document(self, chat_id: str, base64_data: str, filename: str,
                       mimetype: str = "application/pdf", caption: str = "") -> dict:
+        resolved = self._resolve_chat_id(chat_id)
         return self._post("send-document", {
-            "chatId": chat_id,
+            "chatId": resolved,
             "base64": base64_data,
             "mimetype": mimetype,
             "filename": filename,

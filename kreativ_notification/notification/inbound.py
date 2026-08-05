@@ -164,9 +164,14 @@ def process_incoming_message(payload: dict):
         # Check conversation state first (for multi-step flows like ledger)
         conversation = _get_conversation_state(reply_to)
         if conversation:
-            _handle_conversation_reply(reply_to, message_text, conversation, employee_user_id)
-            _mark_chat_as_read(reply_to)
-            return
+            # If user sends a new command keyword while in a conversation, clear stale
+            # state and process the new command instead of treating it as a reply.
+            if _message_matches_bot_command(message_text, settings):
+                _clear_conversation_state(reply_to)
+            else:
+                _handle_conversation_reply(reply_to, message_text, conversation, employee_user_id)
+                _mark_chat_as_read(reply_to)
+                return
 
         # Route to bot commands (replaces hardcoded invoice/ledger)
         _route_bot_commands(reply_to, message_text, employee_user_id)
@@ -450,6 +455,23 @@ def _clear_conversation_state(chat_id: str):
 # ---------------------------------------------------------------------------
 # Generic Bot Command Router
 # ---------------------------------------------------------------------------
+
+def _message_matches_bot_command(message_text: str, settings=None) -> bool:
+    """Check if a message starts with any enabled bot command keyword."""
+    if settings is None:
+        settings = frappe.get_cached_doc("OpenWA Settings")
+    if not settings.bot_commands:
+        return False
+    text_lower = message_text.strip().lower()
+    for cmd in settings.bot_commands:
+        if not cmd.enabled:
+            continue
+        keywords = [k.strip().lower() for k in cmd.command_keyword.split(",") if k.strip()]
+        for kw in keywords:
+            if text_lower.startswith(kw):
+                return True
+    return False
+
 
 def _route_bot_commands(reply_to: str, message_text: str, employee_user_id: str):
     """Route message to matching bot command (longest keyword wins)."""
