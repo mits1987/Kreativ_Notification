@@ -9,7 +9,7 @@ import base64
 import time
 import requests
 from typing import Optional
-from frappe.utils import get_datetime, now_datetime
+from frappe.utils import get_datetime, now_datetime, getdate, add_to_date, format_datetime
 
 from kreativ_notification.notification.openwa_client import (
     check_circuit_breaker,
@@ -172,6 +172,11 @@ def process_incoming_message(payload: dict):
                 _handle_conversation_reply(reply_to, message_text, conversation, employee_user_id)
                 _mark_chat_as_read(reply_to)
                 return
+
+        # Try WhatsApp punch in/out before bot commands (time-sensitive)
+        if _try_whatsapp_punch(reply_to, message_text):
+            _mark_chat_as_read(reply_to)
+            return
 
         # Route to bot commands (replaces hardcoded invoice/ledger)
         _route_bot_commands(reply_to, message_text, employee_user_id)
@@ -860,6 +865,250 @@ def _send_text(chat_id: str, text: str) -> bool:
         source_doctype="OpenWA Settings",
         source_docname="OpenWA Settings",
     ).get("success", False)
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp Punch In/Out
+# ---------------------------------------------------------------------------
+
+# Regex patterns for punch messages
+_PUNCH_KEYWORD_TIME = re.compile(
+    r'(?i)^(in|out)\s+(\d{1,2})[:\s]?(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?$'
+)
+_PUNCH_KEYWORD_ONLY = re.compile(r'(?i)^(in|out)$')
+_PUNCH_TIME_ONLY = re.compile(
+    r'^(\d{1,2})[:\s]?(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?$', re.IGNORECASE
+)
+_PUNCH_BARE_DIGITS = re.compile(r'^(\d{3,4})$')
+
+
+def _parse_punch_message(text: str) -> dict | None:
+    """Parse punch direction + time from a WhatsApp message.
+
+    Returns {"direction": "IN"/"OUT"/None, "hour": int, "minute": int,
+             "meridian": "am"/"pm"/None} or None if not a punch message.
+    """
+    text = text.strip()
+
+    # Pattern 1: keyword + time — "in 8:20", "out 3:50pm", "in 1550"
+    m = _PUNCH_KEYWORD_TIME.match(text)
+    if m:
+        return {
+            "direction": m.group(1).upper(),
+            "hour": int(m.group(2)),
+            "minute": int(m.group(3)),
+            "meridian": m.group(4),
+        }
+
+    # Pattern 2: keyword only — "in", "out"
+    m = _PUNCH_KEYWORD_ONLY.match(text)
+    if m:
+        return {
+            "direction": m.group(1).upper(),
+            "hour": None,
+            "minute": None,
+            "meridian": None,
+        }
+
+    # Pattern 3: time only — "8:20", "3:50pm", "15:50"
+    m = _PUNCH_TIME_ONLY.match(text)
+    if m:
+        return {
+            "direction": None,
+            "hour": int(m.group(1)),
+            "minute": int(m.group(2)),
+            "meridian": m.group(3),
+        }
+
+    # Pattern 4: bare 3-4 digits — "820", "1550"
+    m = _PUNCH_BARE_DIGITS.match(text)
+    if m:
+        digits = m.group(1)
+        if len(digits) == 3:
+            hour = int(digits[0])
+            minute = int(digits[1:])
+        else:
+            hour = int(digits[:2])
+            minute = int(digits[2:])
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return {"direction": None, "hour": hour, "minute": minute, "meridian": None}
+
+    return None
+
+
+def _resolve_punch_time(hour: int, minute: int, meridian: str | None) -> "datetime":
+    """Convert parsed hour/minute/meridian to a datetime for today."""
+    now = now_datetime()
+    today = getdate(now)
+
+    # Normalize 12h → 24h
+    if meridian:
+        m = meridian.lower().replace(".", "")
+        if m in ("pm",) and hour < 12:
+            hour += 12
+        elif m in ("am",) and hour == 12:
+            hour = 0
+
+    # If no meridian and hour looks like 24h (> 12), use as-is
+    # If no meridian and hour <= 12, assume work-hour context:
+    #   hour < 8 → AM, hour >= 8 → AM (most punches are AM/PM pairs)
+    #   The user can always send "3:50pm" to be explicit.
+
+    return get_datetime(f"{today} {hour:02d}:{minute:02d}:00")
+
+
+def _get_employee_by_phone(phone_number: str) -> dict | None:
+    """Find employee by WhatsApp phone number.
+
+    Returns {"name": "HR-EMP-0042", "employee_name": "Mitesh Patel",
+             "user_id": "Administrator"} or None.
+    """
+    # Resolve @lid to @c.us
+    if phone_number.endswith("@lid"):
+        resolved = _resolve_lid_to_phone(phone_number)
+        if resolved:
+            phone_number = resolved
+        else:
+            return None
+
+    # Normalize: "91xxxxxxxxxx@c.us" -> "91xxxxxxxxxx"
+    clean_phone = phone_number.split("@")[0].lstrip("+")
+
+    employees = frappe.get_all(
+        "Employee",
+        filters={
+            "cell_number": ["like", f"%{clean_phone[-10:]}%"],
+            "status": "Active",
+        },
+        fields=["name", "employee_name", "user_id"],
+        limit=1,
+    )
+    if not employees or not employees[0].get("user_id"):
+        return None
+
+    emp = employees[0]
+
+    # Check allowed_roles from OpenWA Settings
+    settings = frappe.get_cached_doc("OpenWA Settings")
+    allowed_roles_raw = settings.allowed_roles or ""
+    allowed_roles = [r.strip() for r in allowed_roles_raw.split(",") if r.strip()]
+
+    if allowed_roles:
+        user_roles = frappe.get_roles(emp["user_id"])
+        if not any(role in user_roles for role in allowed_roles):
+            return None
+
+    return emp
+
+
+def _try_whatsapp_punch(reply_to: str, message_text: str) -> bool:
+    """Intercept WhatsApp messages that are punch in/out commands.
+
+    Returns True if the message was consumed (punch or punch-related response),
+    False if it should fall through to bot commands.
+    """
+    parsed = _parse_punch_message(message_text)
+    if not parsed:
+        return False
+
+    # Get employee by phone
+    emp = _get_employee_by_phone(reply_to)
+    if not emp:
+        return False  # not an authorized employee — let bot commands handle it
+
+    employee_name = emp["name"]
+    employee_display = emp.get("employee_name") or employee_name
+
+    # Resolve direction
+    direction = parsed["direction"]
+
+    # Resolve time
+    if parsed["hour"] is not None:
+        punch_time = _resolve_punch_time(parsed["hour"], parsed["minute"], parsed["meridian"])
+    else:
+        punch_time = now_datetime()
+
+    # Reject future time
+    now = now_datetime()
+    if punch_time > now:
+        _send_text(reply_to, "Cannot punch for a future time. Please enter the actual time.")
+        return True
+
+    # Auto-detect direction if not specified
+    if direction is None:
+        today_start = getdate(now)
+        last = frappe.get_all(
+            "Employee Checkin",
+            filters={
+                "employee": employee_name,
+                "time": [">=", str(today_start)],
+            },
+            fields=["log_type"],
+            order_by="time desc",
+            limit=1,
+        )
+        if not last or last[0].log_type == "OUT":
+            direction = "IN"
+        else:
+            direction = "OUT"
+
+    # Dedup: reject if same employee has a WhatsApp punch within 60 minutes
+    cutoff = add_to_date(now, minutes=-60)
+    recent = frappe.get_all(
+        "Employee Checkin",
+        filters={
+            "employee": employee_name,
+            "device_id": "WhatsApp",
+            "time": [">=", str(cutoff)],
+        },
+        fields=["time", "log_type"],
+        order_by="time desc",
+        limit=1,
+    )
+    if recent:
+        _send_text(
+            reply_to,
+            f"Already punched ({recent[0].log_type}) at "
+            f"{format_datetime(recent[0].time, 'HH:mm')}",
+        )
+        return True
+
+    # Create Employee Checkin
+    try:
+        checkin = frappe.get_doc({
+            "doctype": "Employee Checkin",
+            "employee": employee_name,
+            "time": punch_time,
+            "log_type": direction,
+            "device_id": "WhatsApp",
+            "skip_auto_attendance": 0,
+        })
+        checkin.insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception:
+        frappe.log_error(
+            title="WhatsApp Punch Insert Error",
+            message=frappe.get_traceback(),
+        )
+        _send_text(reply_to, "Failed to record punch. Please try again.")
+        return True
+
+    # Send confirmation via existing notification flow (separate try so
+    # notification failure never loses the punch).
+    try:
+        from kreativ_notification.notification.employee_notifications import notify_checkin
+        notify_checkin(checkin.name)
+    except Exception:
+        frappe.log_error(
+            title="WhatsApp Punch Notification Error",
+            message=frappe.get_traceback(),
+        )
+
+    frappe.logger().info(
+        f"WhatsApp punch: {direction} for {employee_name} at {punch_time} "
+        f"(checkin: {checkin.name})"
+    )
+    return True
 
 
 def _check_rate_limit(sender_chat_id: str) -> bool:
