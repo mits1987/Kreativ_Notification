@@ -173,7 +173,7 @@ def _enqueue_delivery(log_name: str, priority: str = "Normal"):
         queue=queue,
         timeout=600,
         job_id=f"notif-deliver-{log_name}",
-        enqueue_after_commit=False,
+        enqueue_after_commit=True,
         log_name=log_name,
         site=site,
     )
