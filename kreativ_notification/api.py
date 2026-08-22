@@ -4,17 +4,12 @@ These replace the gravures_custom.overrides whitelisted functions.
 All calls are delegated to kreativ_notification.notification modules.
 """
 
+import base64
+
 import frappe
 from frappe import _
 
 from kreativ_notification.notification.dashboard_senders import (
-    send_dispatch_summary,
-    send_dispatch_register,
-    send_dispatch_detail,
-    send_sales_invoice_register,
-    send_sales_invoice_detail,
-    send_party_statement,
-    send_stock_report,
     send_custom_report,
 )
 from kreativ_notification.notification.send import (
@@ -41,58 +36,23 @@ def _get_openwa_client():
 
 # --- Dashboard / Workspace send functions ---
 
-@frappe.whitelist()
-def send_proofing_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Proofing screenshot for WhatsApp (Proofing Area workspace button)."""
-    return send_custom_report("Daily Proofing Report", {"from_date": from_date, "to_date": to_date})
-
 
 @frappe.whitelist()
-def send_dispatch_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Dispatch screenshot for WhatsApp (Dispatch workspace button)."""
-    return send_dispatch_summary()
+def send_screenshot_whatsapp(html_content: str, filename: str = "report") -> dict:
+    """Send a browser-rendered screenshot via WhatsApp.
 
-
-@frappe.whitelist()
-def send_engraving_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Engraving screenshot for WhatsApp."""
-    return send_custom_report("Daily Engraving Report", {"from_date": from_date, "to_date": to_date})
-
-
-@frappe.whitelist()
-def send_engraving_monthly_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Engraving monthly summary for WhatsApp."""
-    return send_custom_report("Daily Engraving Report", {"from_date": from_date, "to_date": to_date, "monthly": True})
-
-
-@frappe.whitelist()
-def send_dispatch_customer_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Dispatch by Customer screenshot for WhatsApp."""
-    return send_dispatch_register()
-
-
-@frappe.whitelist()
-def send_dispatch_monthly_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Dispatch monthly by job type for WhatsApp."""
-    return send_dispatch_detail()
-
-
-@frappe.whitelist()
-def send_dispatch_yearly_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Dispatch yearly screenshot for WhatsApp."""
-    return send_custom_report("Dispatch Yearly", {"from_date": from_date, "to_date": to_date})
-
-
-@frappe.whitelist()
-def send_job_status_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Sales Order Job Status screenshot for WhatsApp."""
-    return send_custom_report("Job Status Report", {"from_date": from_date, "to_date": to_date})
-
-
-@frappe.whitelist()
-def send_monthly_report_whatsapp(from_date: str, to_date: str) -> dict:
-    """Queue Kreativ Monthly Summary (proofing+engraving+dispatch) for WhatsApp."""
-    return send_custom_report("Kreativ Monthly Report", {"from_date": from_date, "to_date": to_date})
+    Called by Custom HTML Block WhatsApp buttons that capture the
+    rendered DOM and pass it here for screenshotting + dispatch.
+    """
+    from kreativ_notification.notification.screenshot_utils import screenshot_html_playwright
+    png = screenshot_html_playwright(html_content)
+    b64 = base64.b64encode(png).decode("utf-8")
+    return send_image_via_whatsapp(
+        b64,
+        f"{filename}.png",
+        filename,
+        source_docname="OpenWA Settings",
+    )
 
 
 # --- Print Preview WhatsApp button helpers ---
