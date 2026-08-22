@@ -182,6 +182,15 @@ def _process_rule(rule_name: str, doc, event: str, date_key: str = ""):
             rule=rule.name,
         )
 
+    # Mark Employee Checkin as dispatched so the retry cron
+    # (retry_missed_notifications) and the dedicated on_checkin_created
+    # hook don't re-send via a second dispatch path.
+    if doc.doctype == "Employee Checkin":
+        frappe.db.set_value(
+            "Employee Checkin", doc.name,
+            "whatsapp_sent", 1, update_modified=False,
+        )
+
 
 def _render_pdf(doc, template) -> tuple[str | None, str | None]:
     try:
