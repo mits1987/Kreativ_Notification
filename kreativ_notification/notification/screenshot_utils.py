@@ -3,7 +3,7 @@ import frappe
 
 
 def screenshot_html_playwright(html: str, width: int = 1000, height: int = None) -> bytes:
-    """Render HTML to PNG using headless Chromium via Playwright."""
+    """Render HTML to JPEG using headless Chromium via Playwright."""
     from playwright.sync_api import sync_playwright
 
     if height is None:
@@ -14,6 +14,6 @@ def screenshot_html_playwright(html: str, width: int = 1000, height: int = None)
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": width, "height": height})
         page.set_content(html, wait_until="networkidle")
-        png = page.screenshot(full_page=True, type="png")
+        jpg = page.screenshot(full_page=True, type="jpeg", quality=85)
         browser.close()
-        return png
+        return jpg

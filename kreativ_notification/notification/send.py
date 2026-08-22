@@ -93,7 +93,7 @@ def send_image_via_whatsapp(
         text=caption or filename,
         file_b64=image_b64,
         filename=filename,
-        mimetype="image/png",
+        mimetype="image/jpeg",
         message_type="Screenshot",
         source_doctype=source_doctype,
         source_docname=source_docname,
