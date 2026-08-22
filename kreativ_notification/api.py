@@ -60,12 +60,9 @@ def send_screenshot_whatsapp(html_content: str, filename: str = "report") -> dic
 
 _CSS = (
     "body{margin:0;padding:20px;font-family:Arial,sans-serif;background:#fff;}"
-    "h3{text-align:center;margin:0 0 6px 0;color:#333;}"
-    "h4{text-align:center;margin:0 0 6px 0;color:#555;}"
-    ".subtitle{text-align:center;color:#666;font-size:13px;margin-bottom:10px;}"
-    "table{border-collapse:collapse;width:100%;font-size:13px;}"
-    "th{background:#eef6f9;color:#333;padding:8px 12px;border:1px solid #ddd;}"
-    "td{padding:6px 12px;border:1px solid #eee;}"
+    "table{border-collapse:collapse;width:100%;}"
+    "th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;font-size:12px;}"
+    "th{background:#eef6f9;font-weight:bold;}"
     ".total-row{font-weight:bold;background:#eef6f9;}"
     ".highest-tmm{background:#d4edda;font-weight:bold;}"
     ".lowest-tmm{background:#f8d7da;font-weight:bold;}"
@@ -74,10 +71,12 @@ _CSS = (
 
 def _wrap_html(title, subtitle, body):
     return (
-        '<!DOCTYPE html><html><head><meta charset="utf-8">'
+        '<!DOCTYPE html><html><head>'
+        '<meta charset="utf-8">'
+        '<link rel="stylesheet" href="/assets/frappe/css/frappe.css">'
         "<style>{css}</style></head><body>"
-        "<h3>{title}</h3>"
-        '<div class="subtitle">{sub}</div>'
+        "<h3 style='text-align:center;margin-bottom:1rem;'>{title}</h3>"
+        "<p style='text-align:center;color:#666;font-size:13px;'>{sub}</p>"
         "{body}</body></html>"
     ).format(css=_CSS, title=title, sub=subtitle, body=body)
 
