@@ -160,9 +160,10 @@ def _process_rule(rule_name: str, doc, event: str, date_key: str = ""):
     if rule.event == "Value Change":
         change_part = f":{doc.get(rule.value_changed_field)}"
 
+    any_dispatched = False
     for recipient in recipients:
         idem = f"rule:{rule.name}:{doc.doctype}:{doc.name}:{event}{change_part}{date_key}:{recipient}"
-        dispatch(
+        result = dispatch(
             recipient=recipient,
             channel=rule.channel or None,
             text=rendered["body"],
@@ -181,11 +182,13 @@ def _process_rule(rule_name: str, doc, event: str, date_key: str = ""):
             meta_template_language=template.meta_template_language or "en",
             rule=rule.name,
         )
+        if result.get("success"):
+            any_dispatched = True
 
     # Mark Employee Checkin as dispatched so the retry cron
     # (retry_missed_notifications) and the dedicated on_checkin_created
     # hook don't re-send via a second dispatch path.
-    if doc.doctype == "Employee Checkin":
+    if doc.doctype == "Employee Checkin" and any_dispatched:
         frappe.db.set_value(
             "Employee Checkin", doc.name,
             "whatsapp_sent", 1, update_modified=False,
