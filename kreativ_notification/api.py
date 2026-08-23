@@ -186,7 +186,7 @@ def send_job_status_whatsapp(from_date, to_date):
 
 # 2. Dispatch by JobType (daily)
 @frappe.whitelist()
-def send_dispatch_whatsapp(from_date, to_date):
+def send_dispatch_whatsapp(from_date, to_date, title="DAILY DISPATCH"):
     result, columns = _run_report_data("Dispatch By Custom_Closed", {"from_date": from_date, "to_date": to_date})
     main_types = ["CFAB", "FABG", "SUPG", "CSUP", "DCRC"]
     grouped = {}
@@ -207,7 +207,7 @@ def send_dispatch_whatsapp(from_date, to_date):
     excl_rows = [(jt, str(v["cyl"]), _fmt(v["tmm"])) for jt, v in sorted(grouped.items()) if jt not in main_types]
 
     # Text caption
-    lines = ["📊 Daily Dispatch Report - {}".format(_date_range_str(from_date, to_date))]
+    lines = ["📊 {} - {}".format(title, _date_range_str(from_date, to_date))]
     if main_rows:
         lines.append("")
         lines.append("Main Job Types:")
@@ -241,14 +241,14 @@ def send_dispatch_whatsapp(from_date, to_date):
     if excl_rows:
         parts.append(_build(excl_rows, "Excluded Types"))
     body = '<div style="display:flex;gap:2rem;flex-wrap:wrap;">{}</div>'.format("".join('<div style="flex:1;">{}</div>'.format(p) for p in parts)) if len(parts) > 1 else (parts[0] if parts else "<p>No data</p>")
-    html = _wrap_html("DAILY DISPATCH", _date_range_str(from_date, to_date), body)
+    html = _wrap_html(title, _date_range_str(from_date, to_date), body)
     return _screenshot_and_send(html, "dispatch_jobtype", caption)
 
 
 # 3. Dispatch Monthly
 @frappe.whitelist()
 def send_dispatch_monthly_whatsapp(from_date, to_date):
-    return send_dispatch_whatsapp(from_date, to_date)
+    return send_dispatch_whatsapp(from_date, to_date, title="MONTHLY DISPATCH")
 
 
 # 4. Dispatch by Customer

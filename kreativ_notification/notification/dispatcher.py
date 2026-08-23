@@ -261,13 +261,21 @@ def deliver(log_name: str, site: str = None):
                     meta.get("meta_template_language") or "en",
                 )
             elif file_b64:
-                result = driver.send_document(
-                    _normalized, file_b64,
-                    meta.get("filename") or "document.pdf",
-                    mimetype=meta.get("mimetype") or "application/pdf",
-                    caption=meta.get("text") or "",
-                    subject=meta.get("subject") or "",
-                )
+                mimetype = meta.get("mimetype") or "application/pdf"
+                if mimetype.startswith("image/") and driver.supports_images:
+                    result = driver.send_image(
+                        _normalized, file_b64,
+                        meta.get("filename") or "image.jpg",
+                        caption=meta.get("text") or "",
+                    )
+                else:
+                    result = driver.send_document(
+                        _normalized, file_b64,
+                        meta.get("filename") or "document.pdf",
+                        mimetype=mimetype,
+                        caption=meta.get("text") or "",
+                        subject=meta.get("subject") or "",
+                    )
             else:
                 result = driver.send_text(_normalized, meta.get("text") or "",
                                           subject=meta.get("subject") or "")

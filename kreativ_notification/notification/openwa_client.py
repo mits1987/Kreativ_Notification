@@ -241,8 +241,14 @@ class OpenWAClient:
         })
 
     def send_image(self, chat_id: str, base64_data: str, filename: str, caption: str = "") -> dict:
-        return self.send_document(chat_id, base64_data, filename,
-                                  mimetype="image/png", caption=caption)
+        resolved = self._resolve_chat_id(chat_id)
+        return self._post("send-image", {
+            "chatId": resolved,
+            "base64": base64_data,
+            "mimetype": "image/jpeg",
+            "filename": filename,
+            "caption": caption,
+        })
 
     def get_contacts(self, limit: int = 200) -> list:
         self._ensure_configured()
