@@ -110,11 +110,11 @@ def _fmt(val):
         return str(val or "")
 
 
-def _screenshot_and_send(html, filename):
+def _screenshot_and_send(html, filename, caption=""):
     from kreativ_notification.notification.screenshot_utils import screenshot_html_playwright
     jpg = screenshot_html_playwright(html)
     b64 = base64.b64encode(jpg).decode("utf-8")
-    return send_image_via_whatsapp(b64, f"{filename}.jpg", filename, source_docname="OpenWA Settings")
+    return send_image_via_whatsapp(b64, f"{filename}.jpg", caption or filename, source_docname="OpenWA Settings")
 
 
 def _date_range_str(from_date, to_date):
@@ -160,6 +160,16 @@ def send_job_status_whatsapp(from_date, to_date):
     total_count = sum(v["count"] for v in grouped.values())
     total_tmm = sum(v["tmm"] for v in grouped.values())
 
+    # Text caption
+    lines = ["📊 Sales Order Status - {}".format(_date_range_str(from_date, to_date))]
+    for state in sorted(grouped.keys()):
+        v = grouped[state]
+        pct = "{:.1f}".format(v["tmm"] / total_tmm * 100) if total_tmm else "0.0"
+        lines.append("• {}: {} orders | {} TMM ({}%)".format(state, v["count"], _fmt(v["tmm"]), pct))
+    lines.append("")
+    lines.append("Total: {} orders | {} TMM".format(total_count, _fmt(total_tmm)))
+    caption = "\n".join(lines)
+
     rows_html = ""
     for state in sorted(grouped.keys()):
         v = grouped[state]
@@ -171,7 +181,7 @@ def send_job_status_whatsapp(from_date, to_date):
     table = table.replace("</tbody>", rows_html + "</tbody>")
     stats = "Total Sales Orders: {} | Total TMM: {:.2f}".format(total_count, total_tmm)
     html = _wrap_html("SALES ORDER STATUS", "{} | {}".format(_date_range_str(from_date, to_date), stats), table)
-    return _screenshot_and_send(html, "job_status")
+    return _screenshot_and_send(html, "job_status", caption)
 
 
 # 2. Dispatch by JobType (daily)
@@ -196,6 +206,26 @@ def send_dispatch_whatsapp(from_date, to_date):
     main_rows = [(jt, str(v["cyl"]), _fmt(v["tmm"])) for jt, v in sorted(grouped.items()) if jt in main_types]
     excl_rows = [(jt, str(v["cyl"]), _fmt(v["tmm"])) for jt, v in sorted(grouped.items()) if jt not in main_types]
 
+    # Text caption
+    lines = ["📊 Daily Dispatch Report - {}".format(_date_range_str(from_date, to_date))]
+    if main_rows:
+        lines.append("")
+        lines.append("Main Job Types:")
+        for jt, cyl, tmm in main_rows:
+            lines.append("• {}: {} cyl | {} TMM".format(jt, cyl, tmm))
+        m_cyl = sum(int(r[1]) for r in main_rows)
+        m_tmm = sum(float(r[2]) for r in main_rows)
+        lines.append("Total: {} cyl | {} TMM".format(m_cyl, _fmt(m_tmm)))
+    if excl_rows:
+        lines.append("")
+        lines.append("Excluded:")
+        for jt, cyl, tmm in excl_rows:
+            lines.append("• {}: {} cyl | {} TMM".format(jt, cyl, tmm))
+        e_cyl = sum(int(r[1]) for r in excl_rows)
+        e_tmm = sum(float(r[2]) for r in excl_rows)
+        lines.append("Total: {} cyl | {} TMM".format(e_cyl, _fmt(e_tmm)))
+    caption = "\n".join(lines)
+
     def _build(rows, title):
         if not rows:
             return ""
@@ -212,7 +242,7 @@ def send_dispatch_whatsapp(from_date, to_date):
         parts.append(_build(excl_rows, "Excluded Types"))
     body = '<div style="display:flex;gap:2rem;flex-wrap:wrap;">{}</div>'.format("".join('<div style="flex:1;">{}</div>'.format(p) for p in parts)) if len(parts) > 1 else (parts[0] if parts else "<p>No data</p>")
     html = _wrap_html("DAILY DISPATCH", _date_range_str(from_date, to_date), body)
-    return _screenshot_and_send(html, "dispatch_jobtype")
+    return _screenshot_and_send(html, "dispatch_jobtype", caption)
 
 
 # 3. Dispatch Monthly
@@ -282,7 +312,26 @@ def send_dispatch_customer_whatsapp(from_date, to_date):
 
     tbl = _table(col_labels, []).replace("</tbody>", trs + "</tbody>")
     html = _wrap_html("CUSTOMER DISPATCH SUMMARY", _date_range_str(from_date, to_date), tbl)
-    return _screenshot_and_send(html, "dispatch_customer")
+
+    # Text caption
+    lines = ["📊 Customer Dispatch Summary - {}".format(_date_range_str(from_date, to_date))]
+    for row in result:
+        if isinstance(row, dict):
+            vals = list(row.values())
+        elif isinstance(row, (list, tuple)):
+            vals = list(row)
+        else:
+            continue
+        parts = []
+        for i, v in enumerate(vals):
+            if i < len(col_labels):
+                parts.append("{}: {}".format(col_labels[i], v))
+        lines.append("• " + " | ".join(parts))
+    lines.append("")
+    lines.append("Total: {} cyl | {} TMM".format(total_cyl, _fmt(total_tmm)))
+    caption = "\n".join(lines)
+
+    return _screenshot_and_send(html, "dispatch_customer", caption)
 
 
 # 5. Dispatch Yearly
@@ -345,7 +394,25 @@ def send_dispatch_yearly_whatsapp(from_date, to_date):
 
     body = yearly_html + ("<hr>" + monthly_html if monthly_html else "")
     html = _wrap_html("DISPATCH YEARLY", _date_range_str(from_date, to_date), body)
-    return _screenshot_and_send(html, "dispatch_yearly")
+
+    # Text caption
+    lines = ["📊 Dispatch Yearly - {}".format(_date_range_str(from_date, to_date))]
+    if main_rows:
+        lines.append("")
+        lines.append("Main Job Types:")
+        for jt, cyl, tmm in main_rows:
+            lines.append("• {}: {} cyl | {} TMM".format(jt, cyl, tmm))
+        m_cyl = sum(int(r[1]) for r in main_rows)
+        m_tmm = sum(float(r[2]) for r in main_rows)
+        lines.append("Total: {} cyl | {} TMM".format(m_cyl, _fmt(m_tmm)))
+    if excl_rows:
+        lines.append("")
+        lines.append("Excluded:")
+        for jt, cyl, tmm in excl_rows:
+            lines.append("• {}: {} cyl | {} TMM".format(jt, cyl, tmm))
+    caption = "\n".join(lines)
+
+    return _screenshot_and_send(html, "dispatch_yearly", caption)
 
 
 # 6. Engraving (daily)
@@ -404,7 +471,27 @@ def send_engraving_whatsapp(from_date, to_date):
         body += "<h4>{}</h4>".format(machine) + _table(desired, []).replace("</tbody>", trs + "</tbody>")
 
     html = _wrap_html("ENGRAVING DETAILS", _date_range_str(from_date, to_date), body or "<p>No data</p>")
-    return _screenshot_and_send(html, "engraving_report")
+
+    # Text caption
+    lines = ["📊 Engraving Details - {}".format(_date_range_str(from_date, to_date))]
+    grand_tmm = 0.0
+    for machine in sorted(by_machine.keys()):
+        rows = by_machine[machine]
+        machine_tmm = 0.0
+        for vals in rows:
+            if tmm_idx >= 0 and tmm_idx < len(vals):
+                try:
+                    machine_tmm += float(str(vals[tmm_idx]).replace(",", "") or 0)
+                except (ValueError, TypeError):
+                    pass
+        grand_tmm += machine_tmm
+        lines.append("")
+        lines.append("{}: {} jobs | {} TMM".format(machine, len(rows), _fmt(machine_tmm)))
+    lines.append("")
+    lines.append("Grand Total: {} TMM".format(_fmt(grand_tmm)))
+    caption = "\n".join(lines)
+
+    return _screenshot_and_send(html, "engraving_report", caption)
 
 
 # 7. Engraving Monthly
@@ -433,7 +520,16 @@ def send_engraving_monthly_whatsapp(from_date, to_date):
     trs += '<tr style="{}"><td>Total</td><td>{:.2f}</td></tr>'.format(_TROW, grand_total)
     tbl = _table(["Machine", "Total TMM"], []).replace("</tbody>", trs + "</tbody>")
     html = _wrap_html("MONTHLY ENGRAVING SUMMARY", _date_range_str(from_date, to_date), tbl)
-    return _screenshot_and_send(html, "engraving_summary")
+
+    # Text caption
+    lines = ["📊 Engraving Monthly Summary - {}".format(_date_range_str(from_date, to_date))]
+    for m, v in sorted(machine_totals.items()):
+        lines.append("• {}: {} TMM".format(m, _fmt(v)))
+    lines.append("")
+    lines.append("Total: {} TMM".format(_fmt(grand_total)))
+    caption = "\n".join(lines)
+
+    return _screenshot_and_send(html, "engraving_summary", caption)
 
 
 # 8. Proofing
@@ -486,7 +582,31 @@ def send_proofing_whatsapp(from_date, to_date):
 
     tbl = _table(display_cols, []).replace("</tbody>", trs + "</tbody>")
     html = _wrap_html("PROOFING DAILY DETAILS", _date_range_str(from_date, to_date), tbl)
-    return _screenshot_and_send(html, "proofing_report")
+
+    # Text caption
+    lines = ["📊 Proofing Details - {}".format(_date_range_str(from_date, to_date))]
+    for row in result:
+        if isinstance(row, dict):
+            vals = list(row.values())
+        elif isinstance(row, (list, tuple)):
+            vals = list(row)
+        else:
+            continue
+        parts = []
+        for label in display_cols:
+            orig_label = [k for k, v in rename.items() if v == label]
+            orig = orig_label[0] if orig_label else label
+            fname = field_map.get(orig, orig)
+            v = row.get(fname, "") if isinstance(row, dict) else (vals[col_labels.index(orig)] if orig in col_labels and col_labels.index(orig) < len(vals) else "")
+            if v:
+                parts.append("{}: {}".format(label, v))
+        if parts:
+            lines.append("• " + " | ".join(parts))
+    lines.append("")
+    lines.append("Total QTY: {}".format(total_qty))
+    caption = "\n".join(lines)
+
+    return _screenshot_and_send(html, "proofing_report", caption)
 
 
 # 9. Monthly Summary (proofing + engraving + dispatch)
@@ -614,7 +734,26 @@ def send_monthly_report_whatsapp(month):
         body = "<p>No data</p>"
 
     html = _wrap_html("MONTHLY SUMMARY - {}".format(period), _date_range_str(from_date, to_date), body)
-    return _screenshot_and_send(html, "monthly_summary")
+
+    # Text caption
+    lines = ["📊 Monthly Summary - {}".format(period)]
+    if proofing_result:
+        t_qty = sum(v["qty"] for v in by_date.values()) if by_date else 0
+        t_tmm = sum(v["tmm"] for v in by_date.values()) if by_date else 0
+        lines.append("")
+        lines.append("Proofing: {} QTY | {} TMM".format(t_qty, _fmt(t_tmm)))
+    if engraving_result:
+        lines.append("")
+        lines.append("Engraving:")
+        for m, v in sorted(machine_totals.items()):
+            lines.append("• {}: {} TMM".format(m, _fmt(v)))
+        lines.append("Total: {} TMM".format(_fmt(grand_total)))
+    if dispatch_result:
+        lines.append("")
+        lines.append("Dispatch: {} cyl | {} TMM".format(grand_cyl, _fmt(grand_tmm)))
+    caption = "\n".join(lines)
+
+    return _screenshot_and_send(html, "monthly_summary", caption)
 
 
 # --- Print Preview WhatsApp button helpers ---
