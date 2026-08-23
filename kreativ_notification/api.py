@@ -114,6 +114,9 @@ def _screenshot_and_send(html, filename, caption=""):
     from kreativ_notification.notification.screenshot_utils import screenshot_html_playwright
     jpg = screenshot_html_playwright(html)
     b64 = base64.b64encode(jpg).decode("utf-8")
+    # WhatsApp caption limit is 1024 chars
+    if len(caption) > 1020:
+        caption = caption[:1017] + "..."
     return send_image_via_whatsapp(b64, f"{filename}.jpg", caption or filename, source_docname="OpenWA Settings")
 
 
@@ -313,8 +316,8 @@ def send_dispatch_customer_whatsapp(from_date, to_date):
     tbl = _table(col_labels, []).replace("</tbody>", trs + "</tbody>")
     html = _wrap_html("CUSTOMER DISPATCH SUMMARY", _date_range_str(from_date, to_date), tbl)
 
-    # Text caption
-    lines = ["📊 Customer Dispatch Summary - {}".format(_date_range_str(from_date, to_date))]
+    # Text caption — top 10 customers by TMM + total
+    customer_data = []
     for row in result:
         if isinstance(row, dict):
             vals = list(row.values())
@@ -322,13 +325,19 @@ def send_dispatch_customer_whatsapp(from_date, to_date):
             vals = list(row)
         else:
             continue
-        parts = []
-        for i, v in enumerate(vals):
-            if i < len(col_labels):
-                parts.append("{}: {}".format(col_labels[i], v))
-        lines.append("• " + " | ".join(parts))
+        cust = vals[0] if vals else ""
+        cyl = int(float(str(vals[cyl_idx]).replace(",", "") or 0)) if cyl_idx >= 0 and cyl_idx < len(vals) else 0
+        tmm = float(str(vals[tmm_idx]).replace(",", "") or 0) if tmm_idx >= 0 and tmm_idx < len(vals) else 0
+        customer_data.append((str(cust), cyl, tmm))
+    customer_data.sort(key=lambda x: x[2], reverse=True)
+
+    lines = ["📊 Customer Dispatch - {}".format(_date_range_str(from_date, to_date))]
+    for cust, cyl, tmm in customer_data[:10]:
+        lines.append("• {}: {} cyl | {} TMM".format(cust[:25], cyl, _fmt(tmm)))
+    if len(customer_data) > 10:
+        lines.append("...and {} more".format(len(customer_data) - 10))
     lines.append("")
-    lines.append("Total: {} cyl | {} TMM".format(total_cyl, _fmt(total_tmm)))
+    lines.append("Total: {} customers | {} cyl | {} TMM".format(len(customer_data), total_cyl, _fmt(total_tmm)))
     caption = "\n".join(lines)
 
     return _screenshot_and_send(html, "dispatch_customer", caption)
