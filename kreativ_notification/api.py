@@ -57,13 +57,16 @@ def send_screenshot_whatsapp(html_content: str, filename: str = "report") -> dic
 
 # --- Server-side report screenshot WhatsApp senders ---
 
+_TBLS = "table table-bordered table-sm"
+_HILITE = "highest-tmm"
+_LOLITE = "lowest-tmm"
+_TROW = "font-weight:bold;background:#eef6f9;"
 
 _CSS = (
-    "body{margin:0;padding:20px;font-family:Arial,sans-serif;background:#fff;}"
+    "body{font-family:Arial,sans-serif;padding:16px;}"
     "table{border-collapse:collapse;width:100%;}"
     "th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;font-size:12px;}"
     "th{background:#eef6f9;font-weight:bold;}"
-    ".total-row{font-weight:bold;background:#eef6f9;}"
     ".highest-tmm{background:#d4edda;font-weight:bold;}"
     ".lowest-tmm{background:#f8d7da;font-weight:bold;}"
 )
@@ -71,14 +74,23 @@ _CSS = (
 
 def _wrap_html(title, subtitle, body):
     return (
-        '<!DOCTYPE html><html><head>'
-        '<meta charset="utf-8">'
+        '<html><head>'
         '<link rel="stylesheet" href="/assets/frappe/css/frappe.css">'
-        "<style>{css}</style></head><body>"
-        "<h3 style='text-align:center;margin-bottom:1rem;'>{title}</h3>"
-        "<p style='text-align:center;color:#666;font-size:13px;'>{sub}</p>"
-        "{body}</body></html>"
-    ).format(css=_CSS, title=title, sub=subtitle, body=body)
+        '<style>' + _CSS + '</style></head><body>'
+        '<h3 style="text-align:center;margin-bottom:1rem;">' + title + '</h3>'
+        + ('<p style="text-align:center;color:#666;font-size:13px;margin:0 0 10px 0;">' + subtitle + '</p>' if subtitle else '')
+        + body + '</body></html>'
+    )
+
+
+def _table(headers, rows, total_row=None):
+    ths = ''.join('<th>' + c + '</th>' for c in headers)
+    trs = ''
+    for row in rows:
+        trs += '<tr>' + ''.join(str(c) for c in row) + '</tr>'
+    if total_row:
+        trs += '<tr style="' + _TROW + '">' + ''.join(str(c) for c in total_row) + '</tr>'
+    return '<table class="' + _TBLS + '"><thead><tr>' + ths + '</tr></thead><tbody>' + trs + '</tbody></table>'
 
 
 def _run_report_data(report_name, filters):
@@ -91,25 +103,11 @@ def _run_report_data(report_name, filters):
     return result.get("result", []), result.get("columns", [])
 
 
-def _fmt_tmm(val):
+def _fmt(val):
     try:
         return "{:.2f}".format(float(str(val).replace(",", "") or 0))
     except (ValueError, TypeError):
         return str(val or "")
-
-
-def _highlight_cells(row, tmm_idx, max_tmm, min_tmm):
-    if tmm_idx < 0 or tmm_idx >= len(row):
-        return row
-    try:
-        v = float(str(row[tmm_idx]).replace(",", "") or 0)
-    except (ValueError, TypeError):
-        return row
-    if max_tmm is not None and abs(v - max_tmm) < 0.01:
-        return list(row[:tmm_idx]) + ['<td class="highest-tmm">{}</td>'.format(_fmt_tmm(v))] + list(row[tmm_idx+1:])
-    if min_tmm is not None and abs(v - min_tmm) < 0.01:
-        return list(row[:tmm_idx]) + ['<td class="lowest-tmm">{}</td>'.format(_fmt_tmm(v))] + list(row[tmm_idx+1:])
-    return row
 
 
 def _screenshot_and_send(html, filename):
@@ -122,6 +120,14 @@ def _screenshot_and_send(html, filename):
 def _date_range_str(from_date, to_date):
     from gravures_custom.overrides import _format_date_range
     return _format_date_range(from_date, to_date)
+
+
+def _cell(v):
+    return '<td>' + str(v) + '</td>'
+
+
+def _hcell(v):
+    return '<th>' + str(v) + '</th>'
 
 
 # 1. Job Status
@@ -161,10 +167,8 @@ def send_job_status_whatsapp(from_date, to_date):
         rows_html += "<tr><td>{}</td><td>{}</td><td>{:.2f}</td><td>{}%</td></tr>".format(
             state, v["count"], v["tmm"], pct)
 
-    table = (
-        '<table><thead><tr><th>Workflow State</th><th>Count</th><th>Total TMM</th><th>Percentage</th></tr></thead>'
-        "<tbody>{}</tbody></table>".format(rows_html)
-    )
+    table = _table(["Workflow State", "Count", "Total TMM", "Percentage"], [])
+    table = table.replace("</tbody>", rows_html + "</tbody>")
     stats = "Total Sales Orders: {} | Total TMM: {:.2f}".format(total_count, total_tmm)
     html = _wrap_html("SALES ORDER STATUS", "{} | {}".format(_date_range_str(from_date, to_date), stats), table)
     return _screenshot_and_send(html, "job_status")
@@ -189,8 +193,8 @@ def send_dispatch_whatsapp(from_date, to_date):
         grouped[jt]["cyl"] += cyl
         grouped[jt]["tmm"] += tmm
 
-    main_rows = [[jt, str(v["cyl"]), _fmt_tmm(v["tmm"])] for jt, v in sorted(grouped.items()) if jt in main_types]
-    excl_rows = [[jt, str(v["cyl"]), _fmt_tmm(v["tmm"])] for jt, v in sorted(grouped.items()) if jt not in main_types]
+    main_rows = [(jt, str(v["cyl"]), _fmt(v["tmm"])) for jt, v in sorted(grouped.items()) if jt in main_types]
+    excl_rows = [(jt, str(v["cyl"]), _fmt(v["tmm"])) for jt, v in sorted(grouped.items()) if jt not in main_types]
 
     def _build(rows, title):
         if not rows:
@@ -198,8 +202,8 @@ def send_dispatch_whatsapp(from_date, to_date):
         total_cyl = sum(int(r[1]) for r in rows)
         total_tmm = sum(float(r[2]) for r in rows)
         trs = "".join("<tr><td>{}</td><td>{}</td><td>{}</td></tr>".format(*r) for r in rows)
-        trs += '<tr class="total-row"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(total_cyl, total_tmm)
-        return "<h4>{}</h4><table><thead><tr><th>Job Type</th><th>Total Cylinders</th><th>Total TMM</th></tr></thead><tbody>{}</tbody></table>".format(title, trs)
+        trs += '<tr style="{}"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(_TROW, total_cyl, total_tmm)
+        return "<h4>{}</h4>".format(title) + _table(["Job Type", "Total Cylinders", "Total TMM"], []).replace("</tbody>", trs + "</tbody>")
 
     parts = []
     if main_rows:
@@ -254,8 +258,8 @@ def send_dispatch_customer_whatsapp(from_date, to_date):
                 try:
                     fv = float(str(v).replace(",", "") or 0)
                     total_tmm += fv
-                    cls = "highest-tmm" if max_tmm is not None and abs(fv - max_tmm) < 0.01 else ("lowest-tmm" if min_tmm is not None and abs(fv - min_tmm) < 0.01 else "")
-                    cells.append('<td class="{}">{}</td>'.format(cls, _fmt_tmm(fv)))
+                    cls = _HILITE if max_tmm is not None and abs(fv - max_tmm) < 0.01 else (_LOLITE if min_tmm is not None and abs(fv - min_tmm) < 0.01 else "")
+                    cells.append('<td class="{}">{}</td>'.format(cls, _fmt(fv)))
                 except (ValueError, TypeError):
                     cells.append("<td>{}</td>".format(v))
             elif i == cyl_idx:
@@ -268,17 +272,16 @@ def send_dispatch_customer_whatsapp(from_date, to_date):
                 cells.append("<td>{}</td>".format(v))
         trs += "<tr>{}</tr>".format("".join(cells))
 
-    if cyl_idx >= 0 or tmm_idx >= 0:
-        trs += '<tr class="total-row"><td>Total</td>'
-        if cyl_idx >= 0:
-            trs += "<td>{}</td>".format(total_cyl)
-        if tmm_idx >= 0:
-            trs += "<td>{:.2f}</td>".format(total_tmm)
-        trs += "</tr>"
+    total_tr = '<tr style="{}"><td>Total</td>'.format(_TROW)
+    if cyl_idx >= 0:
+        total_tr += "<td>{}</td>".format(total_cyl)
+    if tmm_idx >= 0:
+        total_tr += "<td>{:.2f}</td>".format(total_tmm)
+    total_tr += "</tr>"
+    trs += total_tr
 
-    ths = "".join("<th>{}</th>".format(c) for c in col_labels)
-    table = "<table><thead><tr>{}</tr></thead><tbody>{}</tbody></table>".format(ths, trs)
-    html = _wrap_html("CUSTOMER DISPATCH SUMMARY", _date_range_str(from_date, to_date), table)
+    tbl = _table(col_labels, []).replace("</tbody>", trs + "</tbody>")
+    html = _wrap_html("CUSTOMER DISPATCH SUMMARY", _date_range_str(from_date, to_date), tbl)
     return _screenshot_and_send(html, "dispatch_customer")
 
 
@@ -307,8 +310,8 @@ def send_dispatch_yearly_whatsapp(from_date, to_date):
         monthly[month_key][jt]["cyl"] += cyl
         monthly[month_key][jt]["tmm"] += tmm
 
-    main_rows = [[jt, str(v["cyl"]), _fmt_tmm(v["tmm"])] for jt, v in sorted(grouped.items()) if jt in main_types]
-    excl_rows = [[jt, str(v["cyl"]), _fmt_tmm(v["tmm"])] for jt, v in sorted(grouped.items()) if jt not in main_types]
+    main_rows = [(jt, str(v["cyl"]), _fmt(v["tmm"])) for jt, v in sorted(grouped.items()) if jt in main_types]
+    excl_rows = [(jt, str(v["cyl"]), _fmt(v["tmm"])) for jt, v in sorted(grouped.items()) if jt not in main_types]
 
     def _build(rows, title):
         if not rows:
@@ -316,8 +319,8 @@ def send_dispatch_yearly_whatsapp(from_date, to_date):
         total_cyl = sum(int(r[1]) for r in rows)
         total_tmm = sum(float(r[2]) for r in rows)
         trs = "".join("<tr><td>{}</td><td>{}</td><td>{}</td></tr>".format(*r) for r in rows)
-        trs += '<tr class="total-row"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(total_cyl, total_tmm)
-        return "<h4>{}</h4><table><thead><tr><th>Job Type</th><th>Total QTY</th><th>Total TMM</th></tr></thead><tbody>{}</tbody></table>".format(title, trs)
+        trs += '<tr style="{}"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(_TROW, total_cyl, total_tmm)
+        return "<h4>{}</h4>".format(title) + _table(["Job Type", "Total QTY", "Total TMM"], []).replace("</tbody>", trs + "</tbody>")
 
     yearly_parts = []
     if main_rows:
@@ -337,8 +340,8 @@ def send_dispatch_yearly_whatsapp(from_date, to_date):
             m_cyl = sum(v["cyl"] for _, v in mrows)
             m_tmm = sum(v["tmm"] for _, v in mrows)
             trs = "".join("<tr><td>{}</td><td>{}</td><td>{:.2f}</td></tr>".format(jt, v["cyl"], v["tmm"]) for jt, v in mrows)
-            trs += '<tr class="total-row"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(m_cyl, m_tmm)
-            monthly_html += "<h4>{} - {}</h4><table><thead><tr><th>Job Type</th><th>Total QTY</th><th>Total TMM</th></tr></thead><tbody>{}</tbody></table>".format(mk, label, trs)
+            trs += '<tr style="{}"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(_TROW, m_cyl, m_tmm)
+            monthly_html += "<h4>{} - {}</h4>".format(mk, label) + _table(["Job Type", "Total QTY", "Total TMM"], []).replace("</tbody>", trs + "</tbody>")
 
     body = yearly_html + ("<hr>" + monthly_html if monthly_html else "")
     html = _wrap_html("DISPATCH YEARLY", _date_range_str(from_date, to_date), body)
@@ -382,9 +385,12 @@ def send_engraving_whatsapp(from_date, to_date):
         machine_tmm = 0.0
         for vals in rows:
             cells = []
-            for j, label in enumerate(desired):
-                fname = field_map.get(label, label)
-                v = row.get(fname, "") if isinstance(rows[0], dict) and hasattr(rows[0], 'get') else (vals[col_labels.index(label)] if label in col_labels and col_labels.index(label) < len(vals) else "")
+            for label in desired:
+                if label in col_labels:
+                    idx = col_labels.index(label)
+                    v = vals[idx] if idx < len(vals) else ""
+                else:
+                    v = ""
                 if label == "TMM":
                     try:
                         fv = float(str(v).replace(",", "") or 0)
@@ -394,9 +400,8 @@ def send_engraving_whatsapp(from_date, to_date):
                         pass
                 cells.append("<td>{}</td>".format(v))
             trs += "<tr>{}</tr>".format("".join(cells))
-        trs += '<tr class="total-row"><td>Total</td>' + "<td></td>" * (len(desired) - 2) + "<td>{:.2f}</td></tr>".format(machine_tmm)
-        ths = "".join("<th>{}</th>".format(c) for c in desired)
-        body += "<h4>{}</h4><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table>".format(machine, ths, trs)
+        trs += '<tr style="{}"><td>Total</td>'.format(_TROW) + "<td></td>" * (len(desired) - 2) + "<td>{:.2f}</td></tr>".format(machine_tmm)
+        body += "<h4>{}</h4>".format(machine) + _table(desired, []).replace("</tbody>", trs + "</tbody>")
 
     html = _wrap_html("ENGRAVING DETAILS", _date_range_str(from_date, to_date), body or "<p>No data</p>")
     return _screenshot_and_send(html, "engraving_report")
@@ -425,9 +430,9 @@ def send_engraving_monthly_whatsapp(from_date, to_date):
 
     grand_total = sum(machine_totals.values())
     trs = "".join("<tr><td>{}</td><td>{:.2f}</td></tr>".format(m, v) for m, v in sorted(machine_totals.items()))
-    trs += '<tr class="total-row"><td>Total</td><td>{:.2f}</td></tr>'.format(grand_total)
-    table = "<table><thead><tr><th>Machine</th><th>Total TMM</th></tr></thead><tbody>{}</tbody></table>".format(trs)
-    html = _wrap_html("MONTHLY ENGRAVING SUMMARY", _date_range_str(from_date, to_date), table)
+    trs += '<tr style="{}"><td>Total</td><td>{:.2f}</td></tr>'.format(_TROW, grand_total)
+    tbl = _table(["Machine", "Total TMM"], []).replace("</tbody>", trs + "</tbody>")
+    html = _wrap_html("MONTHLY ENGRAVING SUMMARY", _date_range_str(from_date, to_date), tbl)
     return _screenshot_and_send(html, "engraving_summary")
 
 
@@ -456,7 +461,7 @@ def send_proofing_whatsapp(from_date, to_date):
     for row in result:
         vals = list(row.values()) if isinstance(row, dict) else list(row) if isinstance(row, (list, tuple)) else []
         cells = []
-        for j, label in enumerate(display_cols):
+        for label in display_cols:
             orig_label = [k for k, v in rename.items() if v == label]
             orig = orig_label[0] if orig_label else label
             fname = field_map.get(orig, orig)
@@ -469,21 +474,18 @@ def send_proofing_whatsapp(from_date, to_date):
             cells.append("<td>{}</td>".format(v))
         trs += "<tr>{}</tr>".format("".join(cells))
 
-    total_cells = '<td>Total</td>' * len(display_cols)
-    if qty_idx >= 0:
-        total_cells = ""
-        for i, c in enumerate(display_cols):
-            if i == qty_idx:
-                total_cells += "<td>{}</td>".format(total_qty)
-            elif i == 0:
-                total_cells += "<td>Total</td>"
-            else:
-                total_cells += "<td></td>"
-    trs += '<tr class="total-row">{}</tr>'.format(total_cells)
+    total_cells = ""
+    for i, c in enumerate(display_cols):
+        if i == qty_idx:
+            total_cells += "<td>{}</td>".format(total_qty)
+        elif i == 0:
+            total_cells += "<td>Total</td>"
+        else:
+            total_cells += "<td></td>"
+    trs += '<tr style="{}">{}</tr>'.format(_TROW, total_cells)
 
-    ths = "".join("<th>{}</th>".format(c) for c in display_cols)
-    table = "<table><thead><tr>{}</tr></thead><tbody>{}</tbody></table>".format(ths, trs)
-    html = _wrap_html("PROOFING DAILY DETAILS", _date_range_str(from_date, to_date), table)
+    tbl = _table(display_cols, []).replace("</tbody>", trs + "</tbody>")
+    html = _wrap_html("PROOFING DAILY DETAILS", _date_range_str(from_date, to_date), tbl)
     return _screenshot_and_send(html, "proofing_report")
 
 
@@ -520,12 +522,12 @@ def send_monthly_report_whatsapp(month):
         trs = ""
         for d in sorted(by_date.keys()):
             v = by_date[d]
-            cls = "highest-tmm" if abs(v["tmm"] - max_t) < 0.01 and max_t > 0 else ("lowest-tmm" if abs(v["tmm"] - min_t) < 0.01 and len(by_date) > 1 and min_t > 0 else "")
+            cls = _HILITE if abs(v["tmm"] - max_t) < 0.01 and max_t > 0 else (_LOLITE if abs(v["tmm"] - min_t) < 0.01 and len(by_date) > 1 and min_t > 0 else "")
             trs += "<tr><td>{}</td><td>{}</td><td class=\"{}\">{:.2f}</td></tr>".format(d, v["qty"], cls, v["tmm"])
-        trs += '<tr class="total-row"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(t_qty, t_tmm)
+        trs += '<tr style="{}"><td>Total</td><td>{}</td><td>{:.2f}</td></tr>'.format(_TROW, t_qty, t_tmm)
         avg = t_tmm / len(by_date) if by_date else 0
         trs += '<tr style="background:#f9f9f9;"><td>Average</td><td></td><td>{:.2f}</td></tr>'.format(avg)
-        body += "<h4>PROOFING</h4><table><thead><tr><th>Date</th><th>QTY</th><th>TMM</th></tr></thead><tbody>{}</tbody></table>".format(trs)
+        body += "<h4>PROOFING</h4>" + _table(["Date", "QTY", "TMM"], []).replace("</tbody>", trs + "</tbody>")
 
     if engraving_result:
         from collections import defaultdict
@@ -539,6 +541,8 @@ def send_monthly_report_whatsapp(month):
                 by_date_machine[d][machine] += tmm
                 machines.add(machine)
         sorted_machines = sorted(machines)
+        all_totals = [sum(by_date_machine[dd].values()) for dd in by_date_machine]
+        max_row_total = max(all_totals) if all_totals else 0
         grand_total = 0
         trs = ""
         for d in sorted(by_date_machine.keys()):
@@ -549,20 +553,18 @@ def send_monthly_report_whatsapp(month):
                 row_total += v
                 cells += "<td>{:.2f}</td>".format(v)
             grand_total += row_total
-            max_d = max(by_date_machine[d].values()) if by_date_machine[d] else 0
-            min_d = min(v for v in by_date_machine[d].values() if v > 0) if any(v > 0 for v in by_date_machine[d].values()) else 0
-            cls = "highest-tmm" if abs(row_total - max(grand_total for grand_total in [sum(by_date_machine[dd].values()) for dd in by_date_machine])) < 0.01 else ""
+            cls = _HILITE if abs(row_total - max_row_total) < 0.01 and max_row_total > 0 else ""
             cells += '<td class="{}">{:.2f}</td>'.format(cls, row_total)
             trs += "<tr>{}</tr>".format(cells)
         total_cells = "<td>Total</td>"
         for m in sorted_machines:
             total_cells += "<td>{:.2f}</td>".format(sum(by_date_machine[d].get(m, 0) for d in by_date_machine))
-        total_cells += "<td>{:.2f}</td></tr>".format(grand_total)
-        trs += '<tr class="total-row">{}</tr>'.format(total_cells)
+        total_cells += "<td>{:.2f}</td>".format(grand_total)
+        trs += '<tr style="{}">{}</tr>'.format(_TROW, total_cells)
         avg = grand_total / len(by_date_machine) if by_date_machine else 0
         trs += '<tr style="background:#f9f9f9;"><td>Average</td>' + "<td></td>" * len(sorted_machines) + "<td>{:.2f}</td></tr>".format(avg)
-        ths = "<th>Date</th>" + "".join("<th>{}</th>".format(m) for m in sorted_machines) + "<th>Total TMM</th>"
-        body += "<h4>ENGRAVING</h4><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table>".format(ths, trs)
+        ths = ["Date"] + sorted_machines + ["Total TMM"]
+        body += "<h4>ENGRAVING</h4>" + _table(ths, []).replace("</tbody>", trs + "</tbody>")
 
     if dispatch_result:
         from collections import defaultdict
@@ -601,12 +603,12 @@ def send_monthly_report_whatsapp(month):
             tt = sum(by_date_jt[d].get(jt, {"cyl": 0, "tmm": 0.0})["tmm"] for d in by_date_jt)
             total_cells += "<td>{}</td><td>{:.2f}</td>".format(tc, tt)
         total_cells += "<td>{}</td><td>{:.2f}</td>".format(grand_cyl, grand_tmm)
-        trs += '<tr class="total-row">{}</tr>'.format(total_cells)
-        ths = "<th>Date</th>"
+        trs += '<tr style="{}">{}</tr>'.format(_TROW, total_cells)
+        ths = ["Date"]
         for jt in sorted_jts:
-            ths += "<th>{} QTY</th><th>{} TMM</th>".format(jt, jt)
-        ths += "<th>Total QTY</th><th>Total TMM</th>"
-        body += "<h4>DISPATCH</h4><table><thead><tr>{}</tr></thead><tbody>{}</tbody></table>".format(ths, trs)
+            ths += ["{} QTY".format(jt), "{} TMM".format(jt)]
+        ths += ["Total QTY", "Total TMM"]
+        body += "<h4>DISPATCH</h4>" + _table(ths, []).replace("</tbody>", trs + "</tbody>")
 
     if not body:
         body = "<p>No data</p>"
