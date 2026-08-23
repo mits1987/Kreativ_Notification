@@ -7,8 +7,7 @@ def screenshot_html_playwright(html: str, width: int = 1000, height: int = None)
     from playwright.sync_api import sync_playwright
 
     if height is None:
-        # Estimate height based on content length
-        height = max(800, len(html) // 2)
+        height = 400  # minimal — full_page=True captures actual content height
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
