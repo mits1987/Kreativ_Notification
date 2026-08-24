@@ -752,6 +752,7 @@ def send_monthly_report_whatsapp(month):
         lines.append("")
         lines.append("Proofing: {} QTY | {} TMM".format(t_qty, _fmt(t_tmm)))
     if engraving_result:
+        machine_totals = {m: sum(by_date_machine[d].get(m, 0) for d in by_date_machine) for m in sorted_machines}
         lines.append("")
         lines.append("Engraving:")
         for m, v in sorted(machine_totals.items()):
