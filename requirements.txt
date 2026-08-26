@@ -1,4 +1,4 @@
-frappe
-erpnext
+# frappe - Installed and managed by bench
+# erpnext - Installed and managed by bench
 requests
 playwright
