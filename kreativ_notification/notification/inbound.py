@@ -419,6 +419,116 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, e
         frappe.set_user(original_user)
 
 
+def _render_ar_ap_html(report_name, party_label, party_name, company, report_date, data, ageing_ranges):
+    """Render AR/AP report HTML matching standard ERPNext report format."""
+    currency = data[0].get("currency", "INR") if data else "INR"
+
+    rows_html = ""
+    total_invoiced = 0
+    total_outstanding = 0
+    total_r = [0] * 6
+
+    for row in data:
+        invoiced = row.get("invoiced", 0) or 0
+        outstanding = row.get("outstanding", 0) or 0
+        age = row.get("age", 0) or 0
+        ranges = [row.get(f"range{i}", 0) or 0 for i in range(6)]
+        total_invoiced += invoiced
+        total_outstanding += outstanding
+        for j in range(6):
+            total_r[j] += ranges[j]
+
+        rows_html += f"""<tr>
+            <td>{frappe.utils.formatdate(row.get('posting_date'), 'dd-MM-yyyy')}</td>
+            <td>{row.get('voucher_no', '')}</td>
+            <td class="text-right">{int(age)}</td>
+            <td class="text-right">{frappe.utils.fmt_money(invoiced, currency=currency)}</td>
+            <td class="text-right">{frappe.utils.fmt_money(outstanding, currency=currency)}</td>
+        </tr>"""
+
+    total_row = f"""<tr class="total-row">
+        <td colspan="2"><strong>Total</strong></td>
+        <td></td>
+        <td class="text-right"><strong>{frappe.utils.fmt_money(total_invoiced, currency=currency)}</strong></td>
+        <td class="text-right"><strong>{frappe.utils.fmt_money(total_outstanding, currency=currency)}</strong></td>
+    </tr>"""
+
+    ageing_header = ""
+    ageing_values = ""
+    if total_outstanding:
+        ageing_header = "".join(f'<th class="text-right">{aginging_range}</th>' for aginging_range in ageing_ranges)
+        ageing_values = "".join(f'<td class="text-right">{frappe.utils.fmt_money(total_r[i], currency=currency)}</td>' for i in range(1, 6))
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    body {{ font-family: Inter, Arial, sans-serif; font-size: 11px; color: #171717; margin: 10px; }}
+    .title {{ text-align: center; font-size: 14px; font-weight: 600; margin-bottom: 6px; }}
+    .meta {{ display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 11px; }}
+    .meta strong {{ color: #7c7c7c; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th {{ background: #f8f8f8; text-align: center; font-size: 10px; font-weight: 500; color: #7c7c7c;
+         border-top: 1px solid #ededed; border-bottom: 1px solid #ededed; padding: 5px 6px; }}
+    td {{ padding: 5px 6px; border-top: 1px solid #ededed; font-size: 11px; }}
+    .text-right {{ text-align: right; }}
+    .total-row {{ background: #f0f0f0; font-weight: 600; }}
+    .total-row td {{ border-top: 2px solid #ccc; padding-top: 6px; }}
+    .ageing {{ margin-top: 12px; }}
+    .ageing table {{ width: auto; }}
+    .ageing th, .ageing td {{ padding: 4px 10px; font-size: 10px; }}
+    @media print {{ @page {{ size: A4 landscape; margin: 8mm; }} thead {{ display: table-header-group; }} }}
+</style>
+</head>
+<body>
+    <div class="title">{report_name}</div>
+    <div class="meta">
+        <div><strong>{party_label}:</strong> {party_name}</div>
+        <div><strong>Company:</strong> {company}</div>
+        <div><strong>Report Date:</strong> {frappe.utils.formatdate(report_date, 'dd-MM-yyyy')}</div>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 70px; text-align: left;">Date</th>
+                <th style="text-align: left;">Reference</th>
+                <th style="width: 60px; text-align: right;">Age (Days)</th>
+                <th style="width: 90px; text-align: right;">Invoiced Amount</th>
+                <th style="width: 90px; text-align: right;">Outstanding</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+            {total_row}
+        </tbody>
+    </table>
+
+    {"" if not total_outstanding else f'''
+    <div class="ageing">
+        <strong>Ageing Summary:</strong>
+        <table>
+            <thead><tr>
+                <th></th>
+                {ageing_header}
+                <th class="text-right">Total</th>
+            </tr></thead>
+            <tbody><tr>
+                <td>Total Outstanding</td>
+                {ageing_values}
+                <td class="text-right"><strong>{frappe.utils.fmt_money(total_outstanding, currency=currency)}</strong></td>
+            </tr></tbody>
+        </table>
+    </div>
+    '''}
+
+    <p style="text-align: right; font-size: 9px; color: #999; margin-top: 10px;">
+        Printed on {frappe.utils.nowdate()}
+    </p>
+</body>
+</html>"""
+
+
 def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
     """Generate Account Receivable report PDF for a customer."""
     original_user = frappe.session.user
@@ -443,26 +553,17 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
             _send_text(reply_to, f"No outstanding invoices found for {customer_display or customer_name}.")
             return
 
-        letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
-
-        html = frappe.render_template(
-            "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
-            {"filters": filters, "data": result,
-             "report": {"report_name": "Accounts Receivable", "columns": columns},
-             "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
-        )
-        from frappe.www.printview import get_print_style
-        full_html = frappe.render_template("frappe/www/printview.html", {
-            "body": html, "css": get_print_style(),
-            "title": f"Outstanding - {customer_display or customer_name}"
-        })
+        ageing_ranges = ["0-30", "30-60", "60-90", "90-120", "120+"]
+        report_date = frappe.utils.today()
+        display_name = customer_display or customer_name
+        html = _render_ar_ap_html("Accounts Receivable", "Customer", display_name, company, report_date, result, ageing_ranges)
 
         from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
-        pdf_bytes = generate_pdf_from_html(full_html, channel_name="WhatsApp - OpenWA")
+        pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
 
         b64 = base64.b64encode(pdf_bytes).decode("utf-8")
         filename = f"Outstanding_{customer_name}.pdf"
-        caption = f"Account Receivable — {customer_display or customer_name}"
+        caption = f"Account Receivable — {display_name}"
 
         dispatch(
             recipient=reply_to,
@@ -506,26 +607,17 @@ def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, 
             _send_text(reply_to, f"No outstanding bills found for {supplier_display or supplier_name}.")
             return
 
-        letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
-
-        html = frappe.render_template(
-            "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
-            {"filters": filters, "data": result,
-             "report": {"report_name": "Accounts Payable", "columns": columns},
-             "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
-        )
-        from frappe.www.printview import get_print_style
-        full_html = frappe.render_template("frappe/www/printview.html", {
-            "body": html, "css": get_print_style(),
-            "title": f"Payable - {supplier_display or supplier_name}"
-        })
+        ageing_ranges = ["0-30", "30-60", "60-90", "90-120", "120+"]
+        report_date = frappe.utils.today()
+        display_name = supplier_display or supplier_name
+        html = _render_ar_ap_html("Accounts Payable", "Supplier", display_name, company, report_date, result, ageing_ranges)
 
         from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
-        pdf_bytes = generate_pdf_from_html(full_html, channel_name="WhatsApp - OpenWA")
+        pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
 
         b64 = base64.b64encode(pdf_bytes).decode("utf-8")
         filename = f"Payable_{supplier_name}.pdf"
-        caption = f"Account Payable — {supplier_display or supplier_name}"
+        caption = f"Account Payable — {display_name}"
 
         dispatch(
             recipient=reply_to,
