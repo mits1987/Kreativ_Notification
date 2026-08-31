@@ -522,10 +522,10 @@ def sync_delivery_status():
 
     for log in sent_logs:
         try:
-            # Map status to whatsapp_sent: Not Sent → Queued → Delivered / Invalid Number
+            # Map status to whatsapp_sent: 0=Not Sent → 1=Queued → 2=Delivered / 3=Invalid Number
             if log["status"] in ("Sent", "Delivered", "Read"):
                 frappe.db.set_value("Employee Checkin", log["source_docname"],
-                                    "whatsapp_sent", "Delivered", update_modified=False)
+                                    "whatsapp_sent", 2, update_modified=False)
             frappe.db.set_value(LOG_DOCTYPE, log["name"],
                                 "delivery_synced", 1, update_modified=False)
         except Exception:
