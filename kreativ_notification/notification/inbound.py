@@ -344,6 +344,15 @@ def _search_customers(search_term: str) -> list:
     )
 
 
+def _search_suppliers(search_term: str) -> list:
+    return frappe.get_all(
+        "Supplier",
+        filters=[["supplier_name", "like", f"%{search_term}%"]],
+        fields=["name", "supplier_name"],
+        limit_page_length=10,
+    )
+
+
 def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
     original_user = frappe.session.user
     try:
@@ -410,6 +419,138 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, e
         frappe.set_user(original_user)
 
 
+def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
+    """Generate Account Receivable report PDF for a customer."""
+    original_user = frappe.session.user
+    try:
+        frappe.set_user(employee_user_id)
+        from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ar
+
+        company = frappe.db.get_single_value("Global Defaults", "default_company")
+        filters = frappe._dict({
+            "company": company,
+            "report_date": frappe.utils.today(),
+            "age_as_on": frappe.utils.today(),
+            "party_type": "Customer",
+            "party": [customer_name],
+            "account_type": "Receivable",
+            "show_entries": "Yes",
+            "range1": 30,
+            "range2": 60,
+            "range3": 90,
+            "range4": 120,
+        })
+
+        columns, result = get_ar(filters)
+        if not result:
+            _send_text(reply_to, f"No outstanding invoices found for {customer_display or customer_name}.")
+            return
+
+        letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
+
+        html = frappe.render_template(
+            "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
+            {"filters": filters, "data": result,
+             "report": {"report_name": "Accounts Receivable", "columns": columns},
+             "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
+        )
+        from frappe.www.printview import get_print_style
+        full_html = frappe.render_template("frappe/www/printview.html", {
+            "body": html, "css": get_print_style(),
+            "title": f"Outstanding - {customer_display or customer_name}"
+        })
+
+        from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
+        pdf_bytes = generate_pdf_from_html(full_html, channel_name="WhatsApp - OpenWA")
+
+        b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        filename = f"Outstanding_{customer_name}.pdf"
+        caption = f"Account Receivable — {customer_display or customer_name}"
+
+        dispatch(
+            recipient=reply_to,
+            text=caption,
+            file_b64=b64,
+            filename=filename,
+            mimetype="application/pdf",
+            message_type="Print PDF",
+            source_doctype="Customer",
+            source_docname=customer_name,
+            priority="Normal",
+        )
+    except Exception:
+        frappe.log_error(title="Outstanding PDF generation failed", message=frappe.get_traceback())
+        _send_text(reply_to, "Failed to generate outstanding report. Please try again later.")
+    finally:
+        frappe.set_user(original_user)
+
+
+def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, employee_user_id: str):
+    """Generate Account Payable report PDF for a supplier."""
+    original_user = frappe.session.user
+    try:
+        frappe.set_user(employee_user_id)
+        from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ap
+
+        company = frappe.db.get_single_value("Global Defaults", "default_company")
+        filters = frappe._dict({
+            "company": company,
+            "report_date": frappe.utils.today(),
+            "age_as_on": frappe.utils.today(),
+            "party_type": "Supplier",
+            "party": [supplier_name],
+            "account_type": "Payable",
+            "show_entries": "Yes",
+            "range1": 30,
+            "range2": 60,
+            "range3": 90,
+            "range4": 120,
+        })
+
+        columns, result = get_ap(filters)
+        if not result:
+            _send_text(reply_to, f"No outstanding bills found for {supplier_display or supplier_name}.")
+            return
+
+        letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
+
+        html = frappe.render_template(
+            "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
+            {"filters": filters, "data": result,
+             "report": {"report_name": "Accounts Payable", "columns": columns},
+             "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
+        )
+        from frappe.www.printview import get_print_style
+        full_html = frappe.render_template("frappe/www/printview.html", {
+            "body": html, "css": get_print_style(),
+            "title": f"Payable - {supplier_display or supplier_name}"
+        })
+
+        from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
+        pdf_bytes = generate_pdf_from_html(full_html, channel_name="WhatsApp - OpenWA")
+
+        b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        filename = f"Payable_{supplier_name}.pdf"
+        caption = f"Account Payable — {supplier_display or supplier_name}"
+
+        dispatch(
+            recipient=reply_to,
+            text=caption,
+            file_b64=b64,
+            filename=filename,
+            mimetype="application/pdf",
+            message_type="Print PDF",
+            source_doctype="Supplier",
+            source_docname=supplier_name,
+            priority="Normal",
+        )
+    except Exception:
+        frappe.log_error(title="Payable PDF generation failed", message=frappe.get_traceback())
+        _send_text(reply_to, "Failed to generate payable report. Please try again later.")
+    finally:
+        frappe.set_user(original_user)
+
+
 # ---------------------------------------------------------------------------
 # Conversation state machine
 # ---------------------------------------------------------------------------
@@ -437,6 +578,32 @@ def _handle_conversation_reply(reply_to: str, message_text: str, conversation: d
                     _send_ledger_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
             else:
                 _send_text(reply_to, f"Please enter a number between 1 and {len(customers)}.")
+        except ValueError:
+            _send_text(reply_to, "Please enter a valid number.")
+
+    elif conv_type == "outstanding_selection":
+        try:
+            choice = int(message_text.strip())
+            customers = conversation.get("customers", [])
+            if 1 <= choice <= len(customers):
+                selected = customers[choice - 1]
+                _clear_conversation_state(reply_to)
+                _send_outstanding_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
+            else:
+                _send_text(reply_to, f"Please enter a number between 1 and {len(customers)}.")
+        except ValueError:
+            _send_text(reply_to, "Please enter a valid number.")
+
+    elif conv_type == "payable_selection":
+        try:
+            choice = int(message_text.strip())
+            suppliers = conversation.get("suppliers", [])
+            if 1 <= choice <= len(suppliers):
+                selected = suppliers[choice - 1]
+                _clear_conversation_state(reply_to)
+                _send_payable_pdf(selected["name"], selected.get("supplier_name", ""), reply_to, employee_user_id)
+            else:
+                _send_text(reply_to, f"Please enter a number between 1 and {len(suppliers)}.")
         except ValueError:
             _send_text(reply_to, "Please enter a valid number.")
 
@@ -600,35 +767,92 @@ def _handle_document_command(cmd, reply_to: str, identifier: str, employee_user_
 def _handle_report_command(cmd, reply_to: str, identifier: str, employee_user_id: str):
     """Handle Report fetch type - run report and send PDF."""
     if cmd.doc_type == "Customer":
-        # Search for customers matching identifier (partial name match)
-        customers = _search_customers(identifier)
-        if not customers:
-            _send_text(reply_to, f"No customers found matching '{identifier}'.")
-            return
-
-        if len(customers) == 1:
-            # Single match - fetch ledger PDF directly
-            if cmd.api_link:
-                _fetch_remote_ledger_pdf(cmd, customers[0]["name"], reply_to, employee_user_id)
-            else:
-                _send_ledger_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to, employee_user_id)
-            return
-
-        # Multiple matches — send numbered list, save conversation state
-        numbered_list = "Found {0} customers:\n\n".format(len(customers))
-        for i, c in enumerate(customers, 1):
-            numbered_list += "{0}. {1}\n".format(i, c.get("customer_name", c["name"]))
-        numbered_list += "\nReply with number (1-{0}) to get ledger PDF".format(len(customers))
-
-        _save_conversation_state(reply_to, {
-            "type": "ledger_selection",
-            "customers": customers,
-            "cmd_name": cmd.name,  # Store command name for remote/local fetch
-            "created_at": time.time(),
-        })
-        _send_text(reply_to, numbered_list)
+        # Determine which report to run based on command keyword
+        keyword = cmd.command_keyword.split(",")[0].strip().lower()
+        if keyword in ("outstanding", "outstanding report", "beat", "baki"):
+            _handle_outstanding_command(cmd, identifier, reply_to, employee_user_id)
+        else:
+            _handle_ledger_command(cmd, identifier, reply_to, employee_user_id)
+    elif cmd.doc_type == "Supplier":
+        _handle_payable_command(cmd, identifier, reply_to, employee_user_id)
     else:
         _send_text(reply_to, f"Report type not supported for {cmd.doc_type}")
+
+
+def _handle_ledger_command(cmd, identifier: str, reply_to: str, employee_user_id: str):
+    """Handle ledger report — search customers, generate GL PDF."""
+    customers = _search_customers(identifier)
+    if not customers:
+        _send_text(reply_to, f"No customers found matching '{identifier}'.")
+        return
+
+    if len(customers) == 1:
+        if cmd.api_link:
+            _fetch_remote_ledger_pdf(cmd, customers[0]["name"], reply_to, employee_user_id)
+        else:
+            _send_ledger_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to, employee_user_id)
+        return
+
+    numbered_list = "Found {0} customers:\n\n".format(len(customers))
+    for i, c in enumerate(customers, 1):
+        numbered_list += "{0}. {1}\n".format(i, c.get("customer_name", c["name"]))
+    numbered_list += "\nReply with number (1-{0}) to get ledger PDF".format(len(customers))
+
+    _save_conversation_state(reply_to, {
+        "type": "ledger_selection",
+        "customers": customers,
+        "cmd_name": cmd.name,
+        "created_at": time.time(),
+    })
+    _send_text(reply_to, numbered_list)
+
+
+def _handle_outstanding_command(cmd, identifier: str, reply_to: str, employee_user_id: str):
+    """Handle outstanding report — search customers, generate Accounts Receivable PDF."""
+    customers = _search_customers(identifier)
+    if not customers:
+        _send_text(reply_to, f"No customers found matching '{identifier}'.")
+        return
+
+    if len(customers) == 1:
+        _send_outstanding_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to, employee_user_id)
+        return
+
+    numbered_list = "Found {0} customers:\n\n".format(len(customers))
+    for i, c in enumerate(customers, 1):
+        numbered_list += "{0}. {1}\n".format(i, c.get("customer_name", c["name"]))
+    numbered_list += "\nReply with number (1-{0}) to get outstanding report".format(len(customers))
+
+    _save_conversation_state(reply_to, {
+        "type": "outstanding_selection",
+        "customers": customers,
+        "created_at": time.time(),
+    })
+    _send_text(reply_to, numbered_list)
+
+
+def _handle_payable_command(cmd, identifier: str, reply_to: str, employee_user_id: str):
+    """Handle payable report — search suppliers, generate Accounts Payable PDF."""
+    suppliers = _search_suppliers(identifier)
+    if not suppliers:
+        _send_text(reply_to, f"No suppliers found matching '{identifier}'.")
+        return
+
+    if len(suppliers) == 1:
+        _send_payable_pdf(suppliers[0]["name"], suppliers[0].get("supplier_name", ""), reply_to, employee_user_id)
+        return
+
+    numbered_list = "Found {0} suppliers:\n\n".format(len(suppliers))
+    for i, s in enumerate(suppliers, 1):
+        numbered_list += "{0}. {1}\n".format(i, s.get("supplier_name", s["name"]))
+    numbered_list += "\nReply with number (1-{0}) to get payable report".format(len(suppliers))
+
+    _save_conversation_state(reply_to, {
+        "type": "payable_selection",
+        "suppliers": suppliers,
+        "created_at": time.time(),
+    })
+    _send_text(reply_to, numbered_list)
 
 
 def _find_document(cmd, identifier: str) -> str | None:

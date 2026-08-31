@@ -60,6 +60,32 @@ def execute():
             "api_link": "",
             "remarks": "Customer General Ledger report. For remote fetch, set api_link to remote server URL and auth_type to Token.",
         },
+        {
+            "name": "outstanding",
+            "command_keyword": "outstanding,outstanding report,beat,baki",
+            "doc_type": "Customer",
+            "print_format": "",
+            "fetch_type": "Report",
+            "doc_status": "1",
+            "auth_type": "None",
+            "search_field": "name",
+            "allowed_roles": "Sales Manager,Sales User,Marketing User",
+            "api_link": "",
+            "remarks": "Account Receivable report for customer — shows outstanding invoices with posting dates.",
+        },
+        {
+            "name": "payable",
+            "command_keyword": "payable,payable report,supplier outstanding",
+            "doc_type": "Supplier",
+            "print_format": "",
+            "fetch_type": "Report",
+            "doc_status": "1",
+            "auth_type": "None",
+            "search_field": "name",
+            "allowed_roles": "Accounts Manager,Accounts User,Purchase Manager,Purchase User",
+            "api_link": "",
+            "remarks": "Account Payable report for supplier — shows outstanding bills with posting dates.",
+        },
     ]
 
     for cmd_data in default_commands:
