@@ -194,8 +194,8 @@ class OpenWAClient:
     def _resolve_chat_id(self, chat_id: str) -> str:
         """Resolve @c.us to @lid if WhatsApp has migrated the contact.
 
-        OpenWA v0.13.0's internal resolveSendId fails with "No LID for user"
-        for migrated contacts. We bypass this by calling /contacts/check/{phone}
+        Some contacts require @lid format instead of @c.us.
+        We bypass this by calling /contacts/check/{phone}
         which returns the correct @lid format.
         """
         if not chat_id or not chat_id.endswith("@c.us"):

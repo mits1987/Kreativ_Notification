@@ -185,13 +185,14 @@ def _process_rule(rule_name: str, doc, event: str, date_key: str = ""):
         if result.get("success"):
             any_dispatched = True
 
-    # Mark Employee Checkin as dispatched so the retry cron
+    # Mark Employee Checkin as queued so the retry cron
     # (retry_missed_notifications) and the dedicated on_checkin_created
     # hook don't re-send via a second dispatch path.
+    # "Queued" = handed to dispatcher. Updated to "Delivered" by sync_delivery_status.
     if doc.doctype == "Employee Checkin" and any_dispatched:
         frappe.db.set_value(
             "Employee Checkin", doc.name,
-            "whatsapp_sent", 1, update_modified=False,
+            "whatsapp_sent", "Queued", update_modified=False,
         )
 
 

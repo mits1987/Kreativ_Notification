@@ -165,15 +165,25 @@ def _payload_key(log_name: str) -> str:
     return f"notif_payload:{frappe.local.site}:{log_name}"
 
 
+def _resilient_on_failure(job, connection, type, value, traceback):
+    """Fallback on_failure: just log instead of truncate_failed_registry
+    which crashes with ImportError in some Frappe v16 import-order bugs."""
+    frappe.logger().error(
+        f"notif-deliver job {job.id} failed: {type.__name__}: {value}"
+    )
+
+
 def _enqueue_delivery(log_name: str, priority: str = "Normal"):
     queue = {"Urgent": "short", "Normal": "long", "Bulk": "long"}.get(priority, "long")
     site = frappe.local.site
+
     frappe.enqueue(
         "kreativ_notification.notification.dispatcher.deliver",
         queue=queue,
         timeout=600,
         job_id=f"notif-deliver-{log_name}",
-        enqueue_after_commit=True,
+        enqueue_after_commit=False,
+        on_failure=_resilient_on_failure,
         log_name=log_name,
         site=site,
     )
@@ -512,10 +522,10 @@ def sync_delivery_status():
 
     for log in sent_logs:
         try:
-            # Map status to checkin value: 0=Queued, 1=Queued, 2=Delivered, 3=Failed
+            # Map status to whatsapp_sent: Not Sent → Queued → Delivered / Invalid Number
             if log["status"] in ("Sent", "Delivered", "Read"):
                 frappe.db.set_value("Employee Checkin", log["source_docname"],
-                                    "whatsapp_sent", 2, update_modified=False)
+                                    "whatsapp_sent", "Delivered", update_modified=False)
             frappe.db.set_value(LOG_DOCTYPE, log["name"],
                                 "delivery_synced", 1, update_modified=False)
         except Exception:

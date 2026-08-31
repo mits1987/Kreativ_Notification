@@ -14,13 +14,12 @@ This module is therefore only responsible for:
     2. resolving the employee's WhatsApp number
     3. handing off to dispatch() with a stable idempotency key
 
-Employee Checkin custom-field semantics (simplified from v1):
-    whatsapp_sent = 0 / None -> not yet handed to the dispatcher
-    whatsapp_sent = 1        -> handed to the dispatcher (delivery status
-                               now lives in WhatsApp Send Log, not here)
-    whatsapp_sent = 3        -> invalid / missing number — do not retry
-    whatsapp_sent = 2        -> RETIRED. "failed, retry transport" is the
-                               dispatcher's job now; nothing writes 2.
+Employee Checkin custom-field semantics (Select field):
+    whatsapp_sent = "Not Sent" / None -> not yet handed to the dispatcher
+    whatsapp_sent = "Queued"          -> handed to the dispatcher (waiting
+                                         for delivery confirmation)
+    whatsapp_sent = "Delivered"       -> confirmed by WhatsApp
+    whatsapp_sent = "Invalid Number"  -> missing/bad number, stop
 """
 
 from __future__ import annotations
@@ -132,8 +131,8 @@ def notify_checkin(checkin_name: str | frappe.model.document.Document, test_mode
         ["employee", "employee_name", "log_type", "time", "whatsapp_sent"],
         as_dict=True,
     )
-    if not c or c.whatsapp_sent in (1, 3):
-        return  # already handed off / permanently unroutable
+    if not c or c.whatsapp_sent in ("Queued", "Delivered", "Invalid Number"):
+        return  # already queued / delivered / permanently unroutable
 
     # Direction filter. v1 returned WITHOUT marking, so the retry cron
     # re-enqueued filtered punches every 10 min for 24h. Mark them handled.
@@ -141,7 +140,7 @@ def notify_checkin(checkin_name: str | frappe.model.document.Document, test_mode
     if (notify_on == "IN only" and c.log_type != "IN") or \
        (notify_on == "OUT only" and c.log_type != "OUT"):
         frappe.db.set_value("Employee Checkin", checkin_name,
-                            "whatsapp_sent", 1, update_modified=False)
+                            "whatsapp_sent", "Queued", update_modified=False)
         return
 
     emoji = "🟢" if c.log_type == "IN" else "🔴"
@@ -169,12 +168,12 @@ def notify_checkin(checkin_name: str | frappe.model.document.Document, test_mode
                 recipient = settings.chat_id
             else:
                 frappe.db.set_value("Employee Checkin", checkin_name,
-                                    "whatsapp_sent", 3, update_modified=False)
+                                    "whatsapp_sent", "Invalid Number", update_modified=False)
                 frappe.log_error(
                     title=f"Checkin WhatsApp: invalid number for {c.employee}",
                     message=f"Employee {c.employee} ({c.employee_name}) has no "
                             "valid cell_number and no admin fallback chat is "
-                            "configured. Marked whatsapp_sent=3 (stop).",
+                            "configured. Marked whatsapp_sent=Invalid Number (stop).",
                 )
                 return
 
@@ -192,9 +191,9 @@ def notify_checkin(checkin_name: str | frappe.model.document.Document, test_mode
 
     if result.get("success"):
         frappe.db.set_value("Employee Checkin", checkin_name,
-                            "whatsapp_sent", 1, update_modified=False)
+                            "whatsapp_sent", "Queued", update_modified=False)
     # On dispatch() refusal (e.g. no channel configured) we deliberately
-    # leave whatsapp_sent at 0 so the retry cron tries again later.
+    # leave whatsapp_sent at "Not Sent" so the retry cron tries again later.
 
 
 def retry_missed_notifications():
@@ -204,7 +203,7 @@ def retry_missed_notifications():
     Permanently Failed). This job only catches punches whose original
     notify_checkin enqueue was lost (Redis blip, worker crash before the
     dispatch() call). It is idempotent end-to-end because notify_checkin
-    skips whatsapp_sent=1 and dispatch() dedupes on checkin:{name}.
+    skips whatsapp_sent="1"/"2"/"3" and dispatch() dedupes on checkin:{name}.
     """
     if not frappe.db.get_single_value("OpenWA Settings", "enabled"):
         return
@@ -213,7 +212,7 @@ def retry_missed_notifications():
     unsent = frappe.get_all(
         "Employee Checkin",
         filters={
-            "whatsapp_sent": ["in", [0, None]],
+            "whatsapp_sent": ["in", ["Not Sent", "", None]],
             "creation": [">=", cutoff],
         },
         pluck="name",

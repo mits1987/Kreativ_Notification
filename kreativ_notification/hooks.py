@@ -48,6 +48,9 @@ doc_events = {
     "Salary Slip": {
         "on_submit": "kreativ_notification.notification.hooks.on_salary_slip_whatsapp",
     },
+    "Employee Checkin": {
+        "after_insert": "kreativ_notification.notification.employee_notifications.notify_checkin",
+    },
 }
 
 # ---------------------------------------------------------------------------
