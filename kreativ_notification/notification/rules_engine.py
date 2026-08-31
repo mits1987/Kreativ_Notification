@@ -63,6 +63,7 @@ SKIP_DOCTYPES = {
     "Message Template", "Version", "Comment", "Error Log", "Activity Log",
     "Scheduled Job Log", "Email Queue", "Route History", "View Log",
     "Notification Queue",
+    "Employee Checkin",  # has dedicated notify_checkin handler
 }
 
 
