@@ -435,13 +435,10 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
             "party": [customer_name],
             "account_type": "Receivable",
             "show_entries": "Yes",
-            "range1": 30,
-            "range2": 60,
-            "range3": 90,
-            "range4": 120,
+            "range": "30, 60, 90, 120",
         })
 
-        columns, result = get_ar(filters)
+        columns, result, *_ = get_ar(filters)
         if not result:
             _send_text(reply_to, f"No outstanding invoices found for {customer_display or customer_name}.")
             return
@@ -501,13 +498,10 @@ def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, 
             "party": [supplier_name],
             "account_type": "Payable",
             "show_entries": "Yes",
-            "range1": 30,
-            "range2": 60,
-            "range3": 90,
-            "range4": 120,
+            "range": "30, 60, 90, 120",
         })
 
-        columns, result = get_ap(filters)
+        columns, result, *_ = get_ap(filters)
         if not result:
             _send_text(reply_to, f"No outstanding bills found for {supplier_display or supplier_name}.")
             return
