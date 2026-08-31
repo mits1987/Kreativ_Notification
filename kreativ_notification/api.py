@@ -975,3 +975,57 @@ def get_customer_ledger_pdf(customer: str) -> dict:
     base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
     return {"success": True, "pdf_base64": base64_pdf, "filename": f"Statement_{customer_name}.pdf"}
+
+
+@frappe.whitelist()
+def get_customer_outstanding_pdf(customer: str) -> dict:
+    """Generate and return Account Receivable (outstanding) PDF as base64 for remote fetch."""
+    from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
+    from kreativ_notification.notification.inbound import _render_ap_html
+    import base64
+
+    company = frappe.db.get_single_value("Global Defaults", "default_company")
+    today = frappe.utils.today()
+
+    rows = frappe.db.sql("""
+        SELECT voucher_type, voucher_no, posting_date, amount
+        FROM `tabPayment Ledger Entry`
+        WHERE party = %s AND party_type = 'Customer' AND company = %s
+        ORDER BY posting_date ASC
+    """, (customer, company), as_dict=True)
+
+    if not rows:
+        return {"success": False, "error": f"No outstanding entries found for {customer}"}
+
+    html = _render_ap_html(customer, company, today, rows, party_label="Customer", report_title="Accounts Receivable")
+    pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
+    base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    return {"success": True, "pdf_base64": base64_pdf, "filename": f"Outstanding_{customer}.pdf"}
+
+
+@frappe.whitelist()
+def get_supplier_payable_pdf(supplier: str) -> dict:
+    """Generate and return Account Payable (payable) PDF as base64 for remote fetch."""
+    from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
+    from kreativ_notification.notification.inbound import _render_ap_html
+    import base64
+
+    company = frappe.db.get_single_value("Global Defaults", "default_company")
+    today = frappe.utils.today()
+
+    rows = frappe.db.sql("""
+        SELECT voucher_type, voucher_no, posting_date, amount
+        FROM `tabPayment Ledger Entry`
+        WHERE party = %s AND party_type = 'Supplier' AND company = %s
+        ORDER BY posting_date ASC
+    """, (supplier, company), as_dict=True)
+
+    if not rows:
+        return {"success": False, "error": f"No outstanding entries found for {supplier}"}
+
+    html = _render_ap_html(supplier, company, today, rows, party_label="Supplier", report_title="Accounts Payable")
+    pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
+    base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+
+    return {"success": True, "pdf_base64": base64_pdf, "filename": f"Payable_{supplier}.pdf"}

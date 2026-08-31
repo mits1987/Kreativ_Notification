@@ -630,7 +630,7 @@ def _render_ar_ap_html(report_name, party_label, party_name, company, report_dat
 
 
 def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Receivable report PDF for a customer using direct SQL."""
+    """Generate Account Receivable report PDF for a customer using PLE for accurate outstanding."""
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
@@ -639,11 +639,9 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
         today = frappe.utils.today()
 
         rows = frappe.db.sql("""
-            SELECT name, customer_name, posting_date, due_date,
-                   outstanding_amount, grand_total, currency
-            FROM `tabSales Invoice`
-            WHERE customer = %s AND docstatus = 1 AND outstanding_amount != 0
-              AND company = %s
+            SELECT voucher_type, voucher_no, posting_date, amount
+            FROM `tabPayment Ledger Entry`
+            WHERE party = %s AND party_type = 'Customer' AND company = %s
             ORDER BY posting_date ASC
         """, (customer_name, company), as_dict=True)
 
@@ -680,7 +678,7 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
 
 
 def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Payable report PDF for a supplier using direct SQL."""
+    """Generate Account Payable report PDF for a supplier using PLE for accurate outstanding."""
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
@@ -689,11 +687,9 @@ def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, 
         today = frappe.utils.today()
 
         rows = frappe.db.sql("""
-            SELECT name, supplier_name, bill_no, bill_date, posting_date, due_date,
-                   outstanding_amount, grand_total, currency
-            FROM `tabPurchase Invoice`
-            WHERE supplier = %s AND docstatus = 1 AND outstanding_amount > 0
-              AND company = %s
+            SELECT voucher_type, voucher_no, posting_date, amount
+            FROM `tabPayment Ledger Entry`
+            WHERE party = %s AND party_type = 'Supplier' AND company = %s
             ORDER BY posting_date ASC
         """, (supplier_name, company), as_dict=True)
 
@@ -702,7 +698,7 @@ def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, 
             return
 
         display_name = supplier_display or supplier_name
-        html = _render_ap_html(display_name, company, today, rows)
+        html = _render_ap_html(display_name, company, today, rows, party_label="Supplier", report_title="Accounts Payable")
 
         from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
         pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
@@ -766,7 +762,20 @@ def _handle_conversation_reply(reply_to: str, message_text: str, conversation: d
             if 1 <= choice <= len(customers):
                 selected = customers[choice - 1]
                 _clear_conversation_state(reply_to)
-                _send_outstanding_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
+                cmd_name = conversation.get("cmd_name")
+                if cmd_name:
+                    cmd = frappe.get_doc("WhatsApp Bot Command", cmd_name)
+                    if cmd.api_link:
+                        try:
+                            _fetch_remote_report_pdf(cmd, selected["name"], "Customer",
+                                "kreativ_notification.api.get_customer_outstanding_pdf", reply_to)
+                        except Exception:
+                            frappe.log_error(title=f"Remote Outstanding Fetch Failed for {selected['name']}", message=frappe.get_traceback())
+                            _send_text(reply_to, "Failed to fetch outstanding report from remote server.")
+                    else:
+                        _send_outstanding_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
+                else:
+                    _send_outstanding_pdf(selected["name"], selected.get("customer_name", ""), reply_to, employee_user_id)
             else:
                 _send_text(reply_to, f"Please enter a number between 1 and {len(customers)}.")
         except ValueError:
@@ -779,7 +788,20 @@ def _handle_conversation_reply(reply_to: str, message_text: str, conversation: d
             if 1 <= choice <= len(suppliers):
                 selected = suppliers[choice - 1]
                 _clear_conversation_state(reply_to)
-                _send_payable_pdf(selected["name"], selected.get("supplier_name", ""), reply_to, employee_user_id)
+                cmd_name = conversation.get("cmd_name")
+                if cmd_name:
+                    cmd = frappe.get_doc("WhatsApp Bot Command", cmd_name)
+                    if cmd.api_link:
+                        try:
+                            _fetch_remote_report_pdf(cmd, selected["name"], "Supplier",
+                                "kreativ_notification.api.get_supplier_payable_pdf", reply_to)
+                        except Exception:
+                            frappe.log_error(title=f"Remote Payable Fetch Failed for {selected['name']}", message=frappe.get_traceback())
+                            _send_text(reply_to, "Failed to fetch payable report from remote server.")
+                    else:
+                        _send_payable_pdf(selected["name"], selected.get("supplier_name", ""), reply_to, employee_user_id)
+                else:
+                    _send_payable_pdf(selected["name"], selected.get("supplier_name", ""), reply_to, employee_user_id)
             else:
                 _send_text(reply_to, f"Please enter a number between 1 and {len(suppliers)}.")
         except ValueError:
@@ -993,7 +1015,15 @@ def _handle_outstanding_command(cmd, identifier: str, reply_to: str, employee_us
         return
 
     if len(customers) == 1:
-        _send_outstanding_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to, employee_user_id)
+        if cmd.api_link:
+            try:
+                _fetch_remote_report_pdf(cmd, customers[0]["name"], "Customer",
+                    "kreativ_notification.api.get_customer_outstanding_pdf", reply_to)
+            except Exception:
+                frappe.log_error(title=f"Remote Outstanding Fetch Failed for {customers[0]['name']}", message=frappe.get_traceback())
+                _send_text(reply_to, f"Failed to fetch outstanding report from remote server.")
+        else:
+            _send_outstanding_pdf(customers[0]["name"], customers[0].get("customer_name", ""), reply_to, employee_user_id)
         return
 
     numbered_list = "Found {0} customers:\n\n".format(len(customers))
@@ -1004,6 +1034,7 @@ def _handle_outstanding_command(cmd, identifier: str, reply_to: str, employee_us
     _save_conversation_state(reply_to, {
         "type": "outstanding_selection",
         "customers": customers,
+        "cmd_name": cmd.name,
         "created_at": time.time(),
     })
     _send_text(reply_to, numbered_list)
@@ -1017,7 +1048,15 @@ def _handle_payable_command(cmd, identifier: str, reply_to: str, employee_user_i
         return
 
     if len(suppliers) == 1:
-        _send_payable_pdf(suppliers[0]["name"], suppliers[0].get("supplier_name", ""), reply_to, employee_user_id)
+        if cmd.api_link:
+            try:
+                _fetch_remote_report_pdf(cmd, suppliers[0]["name"], "Supplier",
+                    "kreativ_notification.api.get_supplier_payable_pdf", reply_to)
+            except Exception:
+                frappe.log_error(title=f"Remote Payable Fetch Failed for {suppliers[0]['name']}", message=frappe.get_traceback())
+                _send_text(reply_to, f"Failed to fetch payable report from remote server.")
+        else:
+            _send_payable_pdf(suppliers[0]["name"], suppliers[0].get("supplier_name", ""), reply_to, employee_user_id)
         return
 
     numbered_list = "Found {0} suppliers:\n\n".format(len(suppliers))
@@ -1028,6 +1067,7 @@ def _handle_payable_command(cmd, identifier: str, reply_to: str, employee_user_i
     _save_conversation_state(reply_to, {
         "type": "payable_selection",
         "suppliers": suppliers,
+        "cmd_name": cmd.name,
         "created_at": time.time(),
     })
     _send_text(reply_to, numbered_list)
@@ -1162,6 +1202,51 @@ def _fetch_remote_ledger_pdf(cmd, customer_name: str, reply_to: str, employee_us
     except Exception:
         frappe.log_error(title=f"Remote Ledger Fetch Failed for {customer_name}", message=frappe.get_traceback())
         _send_text(reply_to, f"Failed to fetch ledger for {customer_name} from remote server.")
+
+
+def _fetch_remote_report_pdf(cmd, party_name: str, party_label: str, api_method: str, reply_to: str):
+    """Generic remote report PDF fetch (outstanding/payable)."""
+    url = f"{cmd.api_link}/api/method/{api_method}"
+    params = {party_label.lower(): party_name}
+
+    headers = {}
+    if cmd.auth_type == "Token":
+        child_doc = frappe.get_doc("WhatsApp Bot Command", cmd.name)
+        api_key = child_doc.get_password("api_key")
+        api_password = child_doc.get_password("api_password")
+        headers["Authorization"] = f"token {api_key}:{api_password}"
+    elif cmd.auth_type == "Basic":
+        import base64 as b64
+        child_doc = frappe.get_doc("WhatsApp Bot Command", cmd.name)
+        api_password = child_doc.get_password("api_password")
+        headers["Authorization"] = f"Basic {b64.b64encode(api_password.encode()).decode()}"
+
+    r = requests.get(url, params=params, headers=headers, timeout=60)
+    r.raise_for_status()
+    response_json = r.json()
+    message = response_json.get("message", response_json)
+    if not message.get("success"):
+        raise Exception(message.get("error", "Remote API returned error"))
+
+    base64_pdf = message.get("pdf_base64")
+    filename = message.get("filename", f"Report_{party_name}.pdf")
+
+    result = dispatch(
+        recipient=reply_to,
+        text=f"Account Statement — {party_name}",
+        file_b64=base64_pdf,
+        filename=filename,
+        mimetype="application/pdf",
+        message_type="Print PDF",
+        source_doctype=party_label,
+        source_docname=party_name,
+        priority="Normal",
+    )
+
+    if result.get("success"):
+        reset_circuit_breaker()
+    else:
+        increment_circuit_breaker()
 
 
 # ---------------------------------------------------------------------------
