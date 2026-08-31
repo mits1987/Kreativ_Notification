@@ -420,11 +420,28 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, e
 
 
 def _render_ap_html(party_name, company, report_date, rows, party_label="Supplier", report_title="Accounts Payable"):
-    """Render AP/AR HTML: Party | Bill Date | Due Date | Age (Days) | Outstanding."""
+    """Render AP/AR HTML with Kreativ letterhead, centered party name, and data table."""
     from frappe.utils import date_diff
+    import base64 as b64mod
 
     currency = rows[0].get("currency", "INR") if rows else "INR"
     today_date = frappe.utils.getdate(report_date)
+
+    # Load letterhead image as base64
+    letterhead_b64 = ""
+    lh_image = frappe.db.get_single_value("Letter Head", "image") if frappe.db.exists("Letter Head", {"is_default": 1}) else None
+    if lh_image:
+        import os
+        site_path = os.path.join(frappe.get_site_path("public"), lh_image.lstrip("/"))
+        if os.path.exists(site_path):
+            with open(site_path, "rb") as f:
+                letterhead_b64 = b64mod.b64encode(f.read()).decode()
+            ext = lh_image.rsplit(".", 1)[-1].lower()
+            mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif"}.get(ext, "image/jpeg")
+
+    letterhead_html = ""
+    if letterhead_b64:
+        letterhead_html = f'<div style="text-align:center; margin-bottom: 8px;"><img src="data:{mime};base64,{letterhead_b64}" style="max-height: 80px;"></div>'
 
     rows_html = ""
     total_outstanding = 0
@@ -432,11 +449,12 @@ def _render_ap_html(party_name, company, report_date, rows, party_label="Supplie
         outstanding = row.get("outstanding_amount", 0) or 0
         bill_date = row.get("bill_date") or row.get("posting_date")
         due_date = row.get("due_date")
+        bill_no = row.get("bill_no") or row.get("name", "")
         age = date_diff(today_date, bill_date) if bill_date else 0
         total_outstanding += outstanding
 
         rows_html += f"""<tr>
-            <td>{party_name}</td>
+            <td>{bill_no}</td>
             <td>{frappe.utils.formatdate(bill_date, 'dd-MM-yyyy') if bill_date else '-'}</td>
             <td>{frappe.utils.formatdate(due_date, 'dd-MM-yyyy') if due_date else '-'}</td>
             <td class="text-right">{age}</td>
@@ -453,35 +471,40 @@ def _render_ap_html(party_name, company, report_date, rows, party_label="Supplie
 <head>
 <meta charset="utf-8">
 <style>
-    body {{ font-family: Inter, Arial, sans-serif; font-size: 11px; color: #171717; margin: 10px; }}
-    .title {{ text-align: center; font-size: 14px; font-weight: 600; margin-bottom: 6px; }}
-    .meta {{ display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 11px; }}
-    .meta strong {{ color: #7c7c7c; }}
+    body {{ font-family: Inter, Arial, sans-serif; font-size: 11px; color: #171717; margin: 0; padding: 10px; }}
+    .header {{ text-align: center; margin-bottom: 6px; }}
+    .party-name {{ font-size: 20px; font-weight: 700; color: #171717; margin: 10px 0 2px; }}
+    .subtitle {{ font-size: 13px; color: #555; margin-bottom: 4px; }}
+    .meta {{ display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 10px; color: #999; }}
     table {{ width: 100%; border-collapse: collapse; }}
     th {{ background: #f8f8f8; text-align: center; font-size: 10px; font-weight: 500; color: #7c7c7c;
          border-top: 1px solid #ededed; border-bottom: 1px solid #ededed; padding: 5px 6px; }}
     td {{ padding: 5px 6px; border-top: 1px solid #ededed; font-size: 11px; }}
     .text-right {{ text-align: right; }}
+    .text-left {{ text-align: left; }}
     .total-row {{ background: #f0f0f0; font-weight: 600; }}
     .total-row td {{ border-top: 2px solid #ccc; padding-top: 6px; }}
-    @media print {{ @page {{ size: A4 landscape; margin: 8mm; }} thead {{ display: table-header-group; }} }}
+    @media print {{ @page {{ size: A4 portrait; margin: 8mm; }} thead {{ display: table-header-group; }} }}
 </style>
 </head>
 <body>
-    <div class="title">{report_title}</div>
+    {letterhead_html}
+    <div class="header">
+        <div class="party-name">{party_name}</div>
+        <div class="subtitle">Account Statement</div>
+    </div>
     <div class="meta">
-        <div><strong>{party_label}:</strong> {party_name}</div>
         <div><strong>Company:</strong> {company}</div>
         <div><strong>Report Date:</strong> {frappe.utils.formatdate(report_date, 'dd-MM-yyyy')}</div>
     </div>
     <table>
         <thead>
             <tr>
-                <th style="text-align: left;">Party</th>
-                <th style="width: 80px; text-align: left;">Bill Date</th>
-                <th style="width: 80px; text-align: left;">Due Date</th>
-                <th style="width: 60px; text-align: right;">Age (Days)</th>
-                <th style="width: 100px; text-align: right;">Outstanding</th>
+                <th style="text-align: left;">Bill No</th>
+                <th style="text-align: left;">Bill Date</th>
+                <th style="text-align: left;">Due Date</th>
+                <th style="width: 50px; text-align: right;">Age</th>
+                <th style="width: 90px; text-align: right;">Outstanding</th>
             </tr>
         </thead>
         <tbody>
