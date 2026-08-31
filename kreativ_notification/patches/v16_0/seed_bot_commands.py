@@ -63,17 +63,17 @@ def execute():
     ]
 
     for cmd_data in default_commands:
-        std_name = cmd_data.pop("name")
-        # Check if a command with our standard name already exists
-        if not frappe.db.exists("WhatsApp Bot Command", std_name):
+        cmd_data.pop("name", None)
+        # Check by first keyword to avoid duplicates (auto-generated names differ)
+        first_keyword = cmd_data["command_keyword"].split(",")[0].strip()
+        if not frappe.db.exists("WhatsApp Bot Command", {"command_keyword": ["like", f"%{first_keyword}%"]}):
             doc = frappe.get_doc({
                 "doctype": "WhatsApp Bot Command",
-                "name": std_name,
                 **cmd_data,
             })
             doc.insert(ignore_permissions=True)
-            print(f"Created bot command: {std_name}")
+            print(f"Created bot command: {first_keyword}")
         else:
-            print(f"Bot command already exists: {std_name}")
+            print(f"Bot command already exists: {first_keyword}")
 
     frappe.db.commit()
