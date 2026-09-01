@@ -689,7 +689,7 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
 
 
 def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Payable report PDF for a supplier using ERPNext AP report."""
+    """Generate Account Payable report PDF for a supplier using GL entries."""
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
@@ -697,23 +697,28 @@ def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, 
         company = frappe.db.get_single_value("Global Defaults", "default_company")
         today = frappe.utils.today()
 
-        from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ap
-        filters = frappe._dict({
-            "company": company, "report_date": today, "age_as_on": today,
-            "party_type": "Supplier", "party": [supplier_name],
-            "account_type": "Payable", "show_entries": "Yes", "range": "30, 60, 90, 120",
-        })
-        columns, result, *_ = get_ap(filters)
+        rows_raw = frappe.db.sql("""
+            SELECT gl.voucher_type, gl.voucher_no, gl.posting_date,
+                   SUM(gl.debit - gl.credit) as amount
+            FROM `tabGL Entry` gl
+            JOIN `tabAccount` a ON a.name = gl.account
+            WHERE gl.party_type = 'Supplier' AND gl.party = %s
+              AND gl.company = %s
+              AND a.account_type = 'Payable'
+              AND gl.is_cancelled = 0
+              AND gl.voucher_type != 'Payment Entry'
+            GROUP BY gl.voucher_no, gl.posting_date, gl.voucher_type
+            HAVING SUM(gl.debit - gl.credit) < 0
+            ORDER BY gl.posting_date ASC
+        """, (supplier_name, company), as_dict=True)
 
         rows = []
-        for r in result:
-            outstanding = r.get("outstanding", 0) or 0
-            if outstanding > 0:
-                rows.append(frappe._dict({
-                    "bill_no": r.get("voucher_no", ""),
-                    "bill_date": r.get("posting_date"),
-                    "outstanding_amount": outstanding,
-                }))
+        for r in rows_raw:
+            rows.append(frappe._dict({
+                "bill_no": r.voucher_no,
+                "bill_date": r.posting_date,
+                "outstanding_amount": abs(r.amount),
+            }))
 
         if not rows:
             _send_text(reply_to, f"No outstanding bills found for {supplier_display or supplier_name}.")
