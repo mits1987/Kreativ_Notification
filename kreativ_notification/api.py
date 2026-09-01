@@ -979,31 +979,35 @@ def get_customer_ledger_pdf(customer: str) -> dict:
 
 @frappe.whitelist()
 def get_customer_outstanding_pdf(customer: str) -> dict:
-    """Generate and return Account Receivable (outstanding) PDF as base64 for remote fetch."""
+    """Generate and return Account Receivable (outstanding) PDF as base64 for remote fetch.
+    Uses Sales Invoice.outstanding_amount for accurate outstanding + aging."""
     from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
     from kreativ_notification.notification.inbound import _render_ap_html
     import base64
 
     company = frappe.db.get_single_value("Global Defaults", "default_company")
     today = frappe.utils.today()
+    today_date = frappe.utils.getdate(today)
 
-    from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ar
-    filters = frappe._dict({
-        "company": company, "report_date": today, "age_as_on": today,
-        "party_type": "Customer", "party": [customer],
-        "account_type": "Receivable", "show_entries": "Yes", "range": "30, 60, 90, 120",
-    })
-    columns, result, *_ = get_ar(filters)
+    rows_raw = frappe.db.sql("""
+        SELECT si.name, si.posting_date, si.due_date, si.grand_total,
+               si.outstanding_amount, si.customer_name
+        FROM `tabSales Invoice` si
+        WHERE si.customer = %s
+          AND si.docstatus = 1
+          AND si.outstanding_amount > 0
+        ORDER BY si.posting_date ASC
+    """, (customer,), as_dict=True)
 
     rows = []
-    for r in result:
-        outstanding = r.get("outstanding", 0) or 0
-        if outstanding > 0:
-            rows.append(frappe._dict({
-                "bill_no": r.get("voucher_no", ""),
-                "bill_date": r.get("posting_date"),
-                "outstanding_amount": outstanding,
-            }))
+    for r in rows_raw:
+        age_days = frappe.utils.date_diff(today_date, frappe.utils.getdate(r.due_date)) if r.due_date else 0
+        rows.append(frappe._dict({
+            "bill_no": r.name,
+            "bill_date": r.posting_date,
+            "outstanding_amount": r.outstanding_amount,
+            "age_days": age_days,
+        }))
 
     if not rows:
         return {"success": False, "error": f"No outstanding invoices found for {customer}"}
@@ -1017,37 +1021,34 @@ def get_customer_outstanding_pdf(customer: str) -> dict:
 
 @frappe.whitelist()
 def get_supplier_payable_pdf(supplier: str) -> dict:
-    """Generate and return Account Payable (payable) PDF as base64 for remote fetch."""
+    """Generate and return Account Payable (payable) PDF as base64 for remote fetch.
+    Uses Purchase Invoice.outstanding_amount for accurate outstanding + aging."""
     from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
     from kreativ_notification.notification.inbound import _render_ap_html
     import base64
 
     company = frappe.db.get_single_value("Global Defaults", "default_company")
     today = frappe.utils.today()
+    today_date = frappe.utils.getdate(today)
 
-    # ERPNext AR report has a bug for Supplier (missing 'supplier' column).
-    # Use GL Entry grouped by voucher to get outstanding per invoice.
     rows_raw = frappe.db.sql("""
-        SELECT gl.voucher_type, gl.voucher_no, gl.posting_date,
-               SUM(gl.debit - gl.credit) as amount
-        FROM `tabGL Entry` gl
-        JOIN `tabAccount` a ON a.name = gl.account
-        WHERE gl.party_type = 'Supplier' AND gl.party = %s
-          AND gl.company = %s
-          AND a.account_type = 'Payable'
-          AND gl.is_cancelled = 0
-          AND gl.voucher_type != 'Payment Entry'
-        GROUP BY gl.voucher_no, gl.posting_date, gl.voucher_type
-        HAVING SUM(gl.debit - gl.credit) < 0
-        ORDER BY gl.posting_date ASC
-    """, (supplier, company), as_dict=True)
+        SELECT pi.name, pi.posting_date, pi.due_date, pi.grand_total,
+               pi.outstanding_amount, pi.bill_no, pi.bill_date
+        FROM `tabPurchase Invoice` pi
+        WHERE pi.supplier = %s
+          AND pi.docstatus = 1
+          AND pi.outstanding_amount > 0
+        ORDER BY pi.posting_date ASC
+    """, (supplier,), as_dict=True)
 
     rows = []
     for r in rows_raw:
+        age_days = frappe.utils.date_diff(today_date, frappe.utils.getdate(r.due_date)) if r.due_date else 0
         rows.append(frappe._dict({
-            "bill_no": r.voucher_no,
-            "bill_date": r.posting_date,
-            "outstanding_amount": abs(r.amount),
+            "bill_no": r.bill_no or r.name,
+            "bill_date": r.bill_date or r.posting_date,
+            "outstanding_amount": r.outstanding_amount,
+            "age_days": age_days,
         }))
 
     if not rows:

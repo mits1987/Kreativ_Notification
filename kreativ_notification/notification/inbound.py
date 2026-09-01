@@ -450,7 +450,15 @@ def _render_ap_html(party_name, company, report_date, rows, party_label="Supplie
         bill_date = row.get("bill_date") or row.get("posting_date")
         due_date = row.get("due_date")
         bill_no = row.get("bill_no") or row.get("name", "")
-        age = date_diff(today_date, bill_date) if bill_date else 0
+        # Use age_days from API if provided, otherwise compute from due_date
+        if row.get("age_days") is not None:
+            age = row["age_days"]
+        elif due_date:
+            age = date_diff(today_date, due_date)
+        elif bill_date:
+            age = date_diff(today_date, bill_date)
+        else:
+            age = 0
         total_outstanding += outstanding
 
         rows_html += f"""<tr>
@@ -630,31 +638,34 @@ def _render_ar_ap_html(report_name, party_label, party_name, company, report_dat
 
 
 def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Receivable report PDF for a customer using ERPNext AR report."""
+    """Generate Account Receivable report PDF for a customer using Sales Invoice.outstanding_amount."""
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
 
         company = frappe.db.get_single_value("Global Defaults", "default_company")
         today = frappe.utils.today()
+        today_date = frappe.utils.getdate(today)
 
-        from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ar
-        filters = frappe._dict({
-            "company": company, "report_date": today, "age_as_on": today,
-            "party_type": "Customer", "party": [customer_name],
-            "account_type": "Receivable", "show_entries": "Yes", "range": "30, 60, 90, 120",
-        })
-        columns, result, *_ = get_ar(filters)
+        rows_raw = frappe.db.sql("""
+            SELECT si.name, si.posting_date, si.due_date, si.grand_total,
+                   si.outstanding_amount, si.customer_name
+            FROM `tabSales Invoice` si
+            WHERE si.customer = %s
+              AND si.docstatus = 1
+              AND si.outstanding_amount > 0
+            ORDER BY si.posting_date ASC
+        """, (customer_name,), as_dict=True)
 
         rows = []
-        for r in result:
-            outstanding = r.get("outstanding", 0) or 0
-            if outstanding > 0:
-                rows.append(frappe._dict({
-                    "bill_no": r.get("voucher_no", ""),
-                    "bill_date": r.get("posting_date"),
-                    "outstanding_amount": outstanding,
-                }))
+        for r in rows_raw:
+            age_days = frappe.utils.date_diff(today_date, frappe.utils.getdate(r.due_date)) if r.due_date else 0
+            rows.append(frappe._dict({
+                "bill_no": r.name,
+                "bill_date": r.posting_date,
+                "outstanding_amount": r.outstanding_amount,
+                "age_days": age_days,
+            }))
 
         if not rows:
             _send_text(reply_to, f"No outstanding invoices found for {customer_display or customer_name}.")
@@ -689,35 +700,33 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
 
 
 def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Payable report PDF for a supplier using GL entries."""
+    """Generate Account Payable report PDF for a supplier using Purchase Invoice.outstanding_amount."""
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
 
         company = frappe.db.get_single_value("Global Defaults", "default_company")
         today = frappe.utils.today()
+        today_date = frappe.utils.getdate(today)
 
         rows_raw = frappe.db.sql("""
-            SELECT gl.voucher_type, gl.voucher_no, gl.posting_date,
-                   SUM(gl.debit - gl.credit) as amount
-            FROM `tabGL Entry` gl
-            JOIN `tabAccount` a ON a.name = gl.account
-            WHERE gl.party_type = 'Supplier' AND gl.party = %s
-              AND gl.company = %s
-              AND a.account_type = 'Payable'
-              AND gl.is_cancelled = 0
-              AND gl.voucher_type != 'Payment Entry'
-            GROUP BY gl.voucher_no, gl.posting_date, gl.voucher_type
-            HAVING SUM(gl.debit - gl.credit) < 0
-            ORDER BY gl.posting_date ASC
-        """, (supplier_name, company), as_dict=True)
+            SELECT pi.name, pi.posting_date, pi.due_date, pi.grand_total,
+                   pi.outstanding_amount, pi.bill_no, pi.bill_date
+            FROM `tabPurchase Invoice` pi
+            WHERE pi.supplier = %s
+              AND pi.docstatus = 1
+              AND pi.outstanding_amount > 0
+            ORDER BY pi.posting_date ASC
+        """, (supplier_name,), as_dict=True)
 
         rows = []
         for r in rows_raw:
+            age_days = frappe.utils.date_diff(today_date, frappe.utils.getdate(r.due_date)) if r.due_date else 0
             rows.append(frappe._dict({
-                "bill_no": r.voucher_no,
-                "bill_date": r.posting_date,
-                "outstanding_amount": abs(r.amount),
+                "bill_no": r.bill_no or r.name,
+                "bill_date": r.bill_date or r.posting_date,
+                "outstanding_amount": r.outstanding_amount,
+                "age_days": age_days,
             }))
 
         if not rows:
