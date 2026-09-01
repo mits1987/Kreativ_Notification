@@ -630,7 +630,7 @@ def _render_ar_ap_html(report_name, party_label, party_name, company, report_dat
 
 
 def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Receivable report PDF for a customer using PLE for accurate outstanding."""
+    """Generate Account Receivable report PDF for a customer using ERPNext AR report."""
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
@@ -638,12 +638,23 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
         company = frappe.db.get_single_value("Global Defaults", "default_company")
         today = frappe.utils.today()
 
-        rows = frappe.db.sql("""
-            SELECT voucher_type, voucher_no, posting_date, amount
-            FROM `tabPayment Ledger Entry`
-            WHERE party = %s AND party_type = 'Customer' AND company = %s
-            ORDER BY posting_date ASC
-        """, (customer_name, company), as_dict=True)
+        from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ar
+        filters = frappe._dict({
+            "company": company, "report_date": today, "age_as_on": today,
+            "party_type": "Customer", "party": [customer_name],
+            "account_type": "Receivable", "show_entries": "Yes", "range": "30, 60, 90, 120",
+        })
+        columns, result, *_ = get_ar(filters)
+
+        rows = []
+        for r in result:
+            outstanding = r.get("outstanding", 0) or 0
+            if outstanding > 0:
+                rows.append(frappe._dict({
+                    "bill_no": r.get("voucher_no", ""),
+                    "bill_date": r.get("posting_date"),
+                    "outstanding_amount": outstanding,
+                }))
 
         if not rows:
             _send_text(reply_to, f"No outstanding invoices found for {customer_display or customer_name}.")
@@ -678,7 +689,7 @@ def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: s
 
 
 def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Payable report PDF for a supplier using PLE for accurate outstanding."""
+    """Generate Account Payable report PDF for a supplier using ERPNext AP report."""
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
@@ -686,12 +697,23 @@ def _send_payable_pdf(supplier_name: str, supplier_display: str, reply_to: str, 
         company = frappe.db.get_single_value("Global Defaults", "default_company")
         today = frappe.utils.today()
 
-        rows = frappe.db.sql("""
-            SELECT voucher_type, voucher_no, posting_date, amount
-            FROM `tabPayment Ledger Entry`
-            WHERE party = %s AND party_type = 'Supplier' AND company = %s
-            ORDER BY posting_date ASC
-        """, (supplier_name, company), as_dict=True)
+        from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ap
+        filters = frappe._dict({
+            "company": company, "report_date": today, "age_as_on": today,
+            "party_type": "Supplier", "party": [supplier_name],
+            "account_type": "Payable", "show_entries": "Yes", "range": "30, 60, 90, 120",
+        })
+        columns, result, *_ = get_ap(filters)
+
+        rows = []
+        for r in result:
+            outstanding = r.get("outstanding", 0) or 0
+            if outstanding > 0:
+                rows.append(frappe._dict({
+                    "bill_no": r.get("voucher_no", ""),
+                    "bill_date": r.get("posting_date"),
+                    "outstanding_amount": outstanding,
+                }))
 
         if not rows:
             _send_text(reply_to, f"No outstanding bills found for {supplier_display or supplier_name}.")

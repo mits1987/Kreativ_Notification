@@ -987,15 +987,26 @@ def get_customer_outstanding_pdf(customer: str) -> dict:
     company = frappe.db.get_single_value("Global Defaults", "default_company")
     today = frappe.utils.today()
 
-    rows = frappe.db.sql("""
-        SELECT voucher_type, voucher_no, posting_date, amount
-        FROM `tabPayment Ledger Entry`
-        WHERE party = %s AND party_type = 'Customer' AND company = %s
-        ORDER BY posting_date ASC
-    """, (customer, company), as_dict=True)
+    from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ar
+    filters = frappe._dict({
+        "company": company, "report_date": today, "age_as_on": today,
+        "party_type": "Customer", "party": [customer],
+        "account_type": "Receivable", "show_entries": "Yes", "range": "30, 60, 90, 120",
+    })
+    columns, result, *_ = get_ar(filters)
+
+    rows = []
+    for r in result:
+        outstanding = r.get("outstanding", 0) or 0
+        if outstanding > 0:
+            rows.append(frappe._dict({
+                "bill_no": r.get("voucher_no", ""),
+                "bill_date": r.get("posting_date"),
+                "outstanding_amount": outstanding,
+            }))
 
     if not rows:
-        return {"success": False, "error": f"No outstanding entries found for {customer}"}
+        return {"success": False, "error": f"No outstanding invoices found for {customer}"}
 
     html = _render_ap_html(customer, company, today, rows, party_label="Customer", report_title="Accounts Receivable")
     pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
@@ -1014,15 +1025,26 @@ def get_supplier_payable_pdf(supplier: str) -> dict:
     company = frappe.db.get_single_value("Global Defaults", "default_company")
     today = frappe.utils.today()
 
-    rows = frappe.db.sql("""
-        SELECT voucher_type, voucher_no, posting_date, amount
-        FROM `tabPayment Ledger Entry`
-        WHERE party = %s AND party_type = 'Supplier' AND company = %s
-        ORDER BY posting_date ASC
-    """, (supplier, company), as_dict=True)
+    from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute as get_ap
+    filters = frappe._dict({
+        "company": company, "report_date": today, "age_as_on": today,
+        "party_type": "Supplier", "party": [supplier],
+        "account_type": "Payable", "show_entries": "Yes", "range": "30, 60, 90, 120",
+    })
+    columns, result, *_ = get_ap(filters)
+
+    rows = []
+    for r in result:
+        outstanding = r.get("outstanding", 0) or 0
+        if outstanding > 0:
+            rows.append(frappe._dict({
+                "bill_no": r.get("voucher_no", ""),
+                "bill_date": r.get("posting_date"),
+                "outstanding_amount": outstanding,
+            }))
 
     if not rows:
-        return {"success": False, "error": f"No outstanding entries found for {supplier}"}
+        return {"success": False, "error": f"No outstanding invoices found for {supplier}"}
 
     html = _render_ap_html(supplier, company, today, rows, party_label="Supplier", report_title="Accounts Payable")
     pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
