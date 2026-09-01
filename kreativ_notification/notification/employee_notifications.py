@@ -113,10 +113,12 @@ def _get_shift_hours_for_out(employee: str, out_time) -> str:
     return ""
 
 
-def notify_checkin(checkin_name: str | frappe.model.document.Document, test_mode: bool = False):
+def notify_checkin(checkin_name: str | frappe.model.document.Document, method: str | None = None):
     """Background job: dispatch one WhatsApp message for a new punch.
 
     Accepts either a checkin name (str) or a document object (from doc_events hook).
+    ``method`` absorbs the Frappe hook arg (e.g. "after_insert") so it is never
+    mistaken for ``test_mode``.
     """
     # Handle both string (name) and Document object passed by Frappe hooks
     if hasattr(checkin_name, "name"):
@@ -157,7 +159,7 @@ def notify_checkin(checkin_name: str | frappe.model.document.Document, test_mode
             text = f"{text} shift hours: {hours}"
 
     # Test mode -> route to the admin chat instead of the employee.
-    if test_mode or getattr(settings, "test_mode", 0):
+    if getattr(settings, "test_mode", 0):
         recipient = settings.chat_id
         if not recipient:
             return
