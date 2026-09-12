@@ -381,11 +381,25 @@ def _send_ledger_pdf(customer_name: str, customer_display: str, reply_to: str, e
         # Get default letterhead for PDF
         letter_head = frappe.get_cached_doc("Letter Head", {"is_default": 1}) if frappe.db.exists("Letter Head", {"is_default": 1}) else None
 
+        company_doc = frappe.get_cached_doc("Company", company)
+
         html = frappe.render_template(
-            "erpnext/accounts/doctype/process_statement_of_accounts/process_statement_of_accounts.html",
-            {"filters": filters, "data": result,
-             "report": {"report_name": "General Ledger", "columns": columns},
-             "ageing": None, "letter_head": letter_head, "terms_and_conditions": None}
+            "kreativ_notification/templates/customer_ledger.html",
+            {
+                "filters": filters,
+                "data": result,
+                "report": {"report_name": "General Ledger", "columns": columns},
+                "ageing": None,
+                "letter_head": letter_head,
+                "terms_and_conditions": None,
+                "company_name": company_doc.name,
+                "company_address": company_doc.get("address", "") or "",
+                "customer_name": customer_display or customer_name,
+                "customer": customer_name,
+                "from_date": frappe.format(filters.from_date, "Date"),
+                "to_date": frappe.format(filters.to_date, "Date"),
+                "company_currency": company_doc.default_currency,
+            }
         )
         from frappe.www.printview import get_print_style
         full_html = frappe.render_template("frappe/www/printview.html", {
