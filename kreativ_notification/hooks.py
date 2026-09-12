@@ -110,8 +110,7 @@ patches = [
 
 # Fixtures — ship the default bot commands and custom field
 fixtures = [
-    {"dt": "WhatsApp Bot Command"},
-    {"dt": "Custom Field", "filters": [["fieldname", "=", "whatsapp_sent"], ["dt", "=", "Employee Checkin"]]},
+	{"dt": "Custom Field", "filters": [["fieldname", "=", "whatsapp_sent"], ["dt", "=", "Employee Checkin"]]},
 ]
 
 # Extensibility — other apps can add channel drivers and bot commands
