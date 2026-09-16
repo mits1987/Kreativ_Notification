@@ -1,15 +1,15 @@
-"""Seed WhatsApp Bot Commands on fresh install."""
+"""Seed WhatsApp Bot Commands on fresh install only."""
 
 import frappe
 
 
 def execute():
-    """Create default bot commands if they don't exist."""
-    # Define the standard bot commands for a local installation
-    # api_link = "" means local site fetch; users can override for remote
+    """Create default bot commands only if the table is completely empty."""
+    if frappe.db.exists("WhatsApp Bot Command"):
+        return
+
     default_commands = [
         {
-            "name": "invoice",
             "command_keyword": "invoice,inv,bill,बिल",
             "doc_type": "Sales Invoice",
             "print_format": "EINVOICE TALLY",
@@ -19,10 +19,9 @@ def execute():
             "search_field": "name",
             "allowed_roles": "Sales Manager,Sales User,Marketing User",
             "api_link": "",
-            "remarks": "Invoice PDF via EINVOICE TALLY format. For remote fetch, set api_link and auth_type.",
+            "remarks": "Invoice PDF via EINVOICE TALLY format.",
         },
         {
-            "name": "order",
             "command_keyword": "order",
             "doc_type": "Sales Order",
             "print_format": "JobCard",
@@ -32,10 +31,9 @@ def execute():
             "search_field": "name",
             "allowed_roles": "Sales Manager,Sales User,Marketing User",
             "api_link": "",
-            "remarks": "Sales Order PDF via JobCard format. Supports Draft (0) and Submitted (1).",
+            "remarks": "Sales Order PDF via JobCard format.",
         },
         {
-            "name": "dn",
             "command_keyword": "DN,D",
             "doc_type": "Delivery Note",
             "print_format": "Combined DN Invoice",
@@ -45,10 +43,9 @@ def execute():
             "search_field": "name",
             "allowed_roles": "Sales Manager,Sales User,Marketing User",
             "api_link": "",
-            "remarks": "Delivery Note PDF via Combined DN Invoice format. 'D' is shorthand.",
+            "remarks": "Delivery Note PDF via Combined DN Invoice format.",
         },
         {
-            "name": "ledger",
             "command_keyword": "ledger",
             "doc_type": "Customer",
             "print_format": "",
@@ -58,10 +55,9 @@ def execute():
             "search_field": "name",
             "allowed_roles": "Sales Manager,Sales User,Marketing User",
             "api_link": "",
-            "remarks": "Customer General Ledger report. For remote fetch, set api_link to remote server URL and auth_type to Token.",
+            "remarks": "Customer General Ledger report.",
         },
         {
-            "name": "outstanding",
             "command_keyword": "outstanding,outstanding report,beat,baki",
             "doc_type": "Customer",
             "print_format": "",
@@ -71,10 +67,9 @@ def execute():
             "search_field": "name",
             "allowed_roles": "Sales Manager,Sales User,Marketing User",
             "api_link": "",
-            "remarks": "Account Receivable report for customer — shows outstanding invoices with posting dates.",
+            "remarks": "Account Receivable report for customer.",
         },
         {
-            "name": "payable",
             "command_keyword": "payable,payable report,supplier outstanding",
             "doc_type": "Supplier",
             "print_format": "",
@@ -84,22 +79,13 @@ def execute():
             "search_field": "name",
             "allowed_roles": "Accounts Manager,Accounts User,Purchase Manager,Purchase User",
             "api_link": "",
-            "remarks": "Account Payable report for supplier — shows outstanding bills with posting dates.",
+            "remarks": "Account Payable report for supplier.",
         },
     ]
 
     for cmd_data in default_commands:
-        cmd_data.pop("name", None)
-        # Check by first keyword to avoid duplicates (auto-generated names differ)
-        first_keyword = cmd_data["command_keyword"].split(",")[0].strip()
-        if not frappe.db.exists("WhatsApp Bot Command", {"command_keyword": ["like", f"%{first_keyword}%"]}):
-            doc = frappe.get_doc({
-                "doctype": "WhatsApp Bot Command",
-                **cmd_data,
-            })
-            doc.insert(ignore_permissions=True)
-            print(f"Created bot command: {first_keyword}")
-        else:
-            print(f"Bot command already exists: {first_keyword}")
+        doc = frappe.get_doc({"doctype": "WhatsApp Bot Command", **cmd_data})
+        doc.insert(ignore_permissions=True)
+        print(f"Seeded bot command: {cmd_data['command_keyword'].split(',')[0].strip()}")
 
     frappe.db.commit()
