@@ -74,6 +74,8 @@ def _breaker_reset(channel: str):
 # Reason strings written by _defer(); process_fallbacks keys off these.
 DEFER_QUIET_HOURS = "Quiet hours"
 DEFER_RATE_LIMIT = "Rate limit"
+DEFER_RECONNECT = "Reconnect cooldown"
+RECONNECT_COOLDOWN_MINUTES = 5
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +229,13 @@ def deliver(log_name: str, site: str = None):
             _reschedule(log_name, row["retry_count"],
                         error="Circuit breaker open — channel failing", count_attempt=False)
             return
+
+        # ---- Post-reconnect cooldown (WhatsApp anti-spam) --------------------
+        if row["priority"] != "Urgent":
+            wait_reconnect = _reconnect_cooldown_wait(channel)
+            if wait_reconnect:
+                _defer(log_name, minutes=wait_reconnect, reason=DEFER_RECONNECT)
+                return
 
         # ---- Quiet hours (Urgent bypasses) -----------------------------------
         if row["priority"] != "Urgent":
@@ -561,6 +570,46 @@ def _quiet_hours_wait(channel: str) -> int:
     else:  # spans midnight, e.g. 21:00 → 08:00
         in_quiet = now_t >= start or now_t < end
     return minutes_until(end) or 1 if in_quiet else 0
+
+
+
+def _reconnect_cooldown_wait(channel: str) -> int:
+    """Return minutes to wait if session just reconnected, else 0.
+
+    After a WhatsApp QR re-scan, firing all queued messages at once triggers
+    anti-spam and the session gets kicked again. This returns a cooldown
+    duration if the session reconnected within RECONNECT_COOLDOWN_MINUTES.
+    """
+    if "WhatsApp" not in channel:
+        return 0
+    try:
+        settings = frappe.get_cached_doc("OpenWA Settings")
+        if not settings.get("enabled"):
+            return 0
+        session_id = settings.get("session_id")
+        if not session_id:
+            return 0
+        import requests as _req
+        base_url = settings.get("base_url") or "http://localhost:2785"
+        api_key = settings.get_password("api_key") or ""
+        r = _req.get(
+            f"{base_url}/api/sessions/{session_id}",
+            headers={"X-API-Key": api_key},
+            timeout=5,
+        )
+        if not r.ok:
+            return 0
+        data = r.json()
+        last_active = data.get("lastActive")
+        if not last_active:
+            return 0
+        la = get_datetime(last_active)
+        diff_min = (now_datetime() - la).total_seconds() / 60
+        if diff_min < RECONNECT_COOLDOWN_MINUTES:
+            return RECONNECT_COOLDOWN_MINUTES - int(diff_min)
+    except Exception:
+        pass
+    return 0
 
 
 def _rate_limit_ok(channel: str) -> bool:
