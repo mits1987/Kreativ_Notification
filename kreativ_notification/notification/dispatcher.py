@@ -622,14 +622,13 @@ def _rate_limit_ok(channel: str) -> bool:
     now = now_datetime().timestamp()
     window_start = now - 60
     try:
-        # Store timestamps of successful sends (sorted set via JSON array)
+        # Store timestamps of SUCCESSFUL sends only (no pre-add).
+        # _rate_limit_record_success() appends after send completes.
         timestamps = frappe.cache().get_value(key) or []
         # Filter to last 60 seconds
         timestamps = [ts for ts in timestamps if ts > window_start]
         if len(timestamps) >= limit:
             return False
-        # Pre-add this attempt's timestamp (will be confirmed on success)
-        timestamps.append(now)
         frappe.cache().set_value(key, timestamps, expires_in_sec=120)
         return True
     except Exception:
@@ -642,17 +641,22 @@ def _rate_limit_ok(channel: str) -> bool:
 
 
 def _rate_limit_record_success(channel: str):
-    """Called after successful send to confirm the rate limit slot."""
+    """Called after successful send to record the rate limit slot."""
     ch = frappe.get_cached_doc("Notification Channel", channel)
     limit = cint(ch.rate_limit_per_minute)
     if not limit:
         return
     key = f"notif_rate:{frappe.local.site}:{channel}"
+    now = now_datetime().timestamp()
     try:
-        # Already pre-added in _rate_limit_ok; this just ensures TTL
-        frappe.cache().expire(key, 120)
+        # Append timestamp on successful send only
+        timestamps = frappe.cache().get_value(key) or []
+        timestamps.append(now)
+        # Keep only last 120s to avoid unbounded growth
+        timestamps = [ts for ts in timestamps if ts > now - 120]
+        frappe.cache().set_value(key, timestamps, expires_in_sec=120)
     except Exception:
-        pass
+        frappe.cache().set_value(key, 1, expires_in_sec=60)
 
 
 # Removed: _breaker_cache_key, _breaker_open, _breaker_trip, _breaker_reset
