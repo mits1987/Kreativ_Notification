@@ -118,17 +118,21 @@ class OpenWADriver(BaseChannelDriver):
         # First attempt
         result = self._to_result(getattr(client, method)(recipient, *args, **kwargs))
 
-        # If HTTP 500 from send-text/send-document, treat as permanent failure
-        # OpenWA returns generic "Internal server error" for "No LID for user"
-        # which means the number is not on WhatsApp. The check_contact via
-        # profile-picture endpoint returns 200 for all contacts so it's unreliable.
+        # HTTP 500 on text sends may mean "No LID for user" (non-WhatsApp number).
+        # HTTP 500 on media sends is often a whatsapp-web.js bug (chat store issue).
+        # Don't mark media sends as permanent — let them retry.
         if not result.get("success") and "HTTP 500" in str(result.get("error", "")):
-            if method in ("send_text", "send_document", "send_image"):
-                # Treat HTTP 500 on message sends as permanent (non-WhatsApp number)
+            if method in ("send_text",):
                 return SendResult.fail(
                     f"Contact not on WhatsApp or OpenWA error: {recipient}",
                     raw=result.get("raw"),
                     permanent=True,
+                )
+            elif method in ("send_document", "send_image"):
+                return SendResult.fail(
+                    f"Media send failed (OpenWA engine error): {recipient}",
+                    raw=result.get("raw"),
+                    permanent=False,
                 )
         return result
 

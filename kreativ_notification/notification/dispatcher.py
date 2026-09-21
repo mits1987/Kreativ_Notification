@@ -317,6 +317,23 @@ def deliver(log_name: str, site: str = None):
             frappe.db.commit()
             frappe.cache().delete_value(_payload_key(log_name))
         else:
+            # FIX: text fallback for failed media sends (whatsapp-web.js bug)
+            if not result.get("permanent") and file_b64 and meta.get("text"):
+                try:
+                    fallback = driver.send_text(_normalized, meta["text"])
+                    if fallback.get("success"):
+                        _rate_limit_record_success(channel)
+                        frappe.db.set_value(LOG_DOCTYPE, log_name, {
+                            "status": "Sent",
+                            "provider_message_id": fallback.get("message_id") or "",
+                            "error_message": "Sent as text (media send failed)",
+                        }, update_modified=False)
+                        frappe.db.commit()
+                        frappe.cache().delete_value(_payload_key(log_name))
+                        return
+                except Exception:
+                    pass
+
             # FIX v3: only trip breaker on TRANSPORT failures (non-permanent)
             if result.get("permanent"):
                 # Bad number, unconfigured channel etc. — do NOT open breaker
