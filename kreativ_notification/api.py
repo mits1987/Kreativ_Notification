@@ -1059,3 +1059,32 @@ def get_supplier_payable_pdf(supplier: str) -> dict:
     base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
     return {"success": True, "pdf_base64": base64_pdf, "filename": f"Payable_{supplier}.pdf"}
+
+@frappe.whitelist()
+def duplicate_employee_checkin(checkin_name):
+    """Whitelisted method to duplicate Employee Checkin - preserves original DATE, uses current TIME"""
+    doc = frappe.get_doc("Employee Checkin", checkin_name)
+    
+    if not frappe.has_permission("Employee Checkin", "create"):
+        frappe.throw("Not permitted to create Employee Checkin")
+    
+    if not frappe.has_permission("Employee Checkin", "read", doc):
+        frappe.throw("Not permitted to read this Employee Checkin")
+    
+    # Duplicate the document - preserve original DATE, use current TIME
+    new_doc = frappe.copy_doc(doc)
+    from frappe.utils import now_datetime
+    now = now_datetime()
+    # Preserve original DATE, use current TIME
+    original_date = doc.time.date()
+    new_doc.time = frappe.utils.get_datetime(f"{original_date} {now.time()}")
+    
+    # Clear geolocation fields to avoid validation errors
+    new_doc.latitude = None
+    new_doc.longitude = None
+    new_doc.geolocation = None
+    new_doc.log_location = None
+    new_doc.attendance_image = None
+    
+    new_doc.insert(ignore_permissions=True)
+    return new_doc
