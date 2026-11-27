@@ -34,6 +34,11 @@ INBOUND_JOB_QUEUE = "short"
 INBOUND_JOB_TIMEOUT = 300
 CONVERSATION_TTL = 300  # 5 minutes
 
+# Accounts Receivable report + its bill-wise pending print format.
+# The print format renders the same layout as the on-screen report.
+ACCOUNTS_RECEIVABLE_REPORT = "Accounts Receivable"
+CUSTOMER_BILL_WISE_PRINT_FORMAT = "Customer Bill-wise Pending"
+
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def receive_whatsapp_message():
@@ -651,45 +656,96 @@ def _render_ar_ap_html(report_name, party_label, party_name, company, report_dat
 </html>"""
 
 
+def _outstanding_report_filters(customer_name: str) -> dict:
+    """Filters for the Accounts Receivable report, scoped to one customer."""
+    company = frappe.db.get_single_value("Global Defaults", "default_company")
+    return {
+        "company": company,
+        "report_date": frappe.utils.today(),
+        "party_type": "Customer",
+        # `party` is a MultiSelectList in the report, so it must be a list
+        "party": [customer_name],
+        "ageing_based_on": "Due Date",
+        "range": "30, 60, 90, 120",
+    }
+
+
+def _outstanding_pdf_from_invoices(customer_name: str) -> bytes:
+    """Fallback PDF built straight from Sales Invoice.outstanding_amount."""
+    company = frappe.db.get_single_value("Global Defaults", "default_company")
+    today = frappe.utils.today()
+    today_date = frappe.utils.getdate(today)
+
+    rows_raw = frappe.db.sql("""
+        SELECT si.name, si.posting_date, si.due_date, si.grand_total,
+               si.outstanding_amount, si.customer_name
+        FROM `tabSales Invoice` si
+        WHERE si.customer = %s
+          AND si.docstatus = 1
+          AND si.outstanding_amount > 0
+        ORDER BY si.posting_date ASC
+    """, (customer_name,), as_dict=True)
+
+    rows = []
+    for r in rows_raw:
+        age_days = frappe.utils.date_diff(today_date, frappe.utils.getdate(r.due_date)) if r.due_date else 0
+        rows.append(frappe._dict({
+            "bill_no": r.name,
+            "bill_date": r.posting_date,
+            "outstanding_amount": r.outstanding_amount,
+            "age_days": age_days,
+        }))
+
+    if not rows:
+        return None
+
+    html = _render_ap_html(customer_name, company, today, rows, party_label="Customer", report_title="Accounts Receivable")
+
+    from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
+    return generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
+
+
 def _send_outstanding_pdf(customer_name: str, customer_display: str, reply_to: str, employee_user_id: str):
-    """Generate Account Receivable report PDF for a customer using Sales Invoice.outstanding_amount."""
+    """Generate Account Receivable bill-wise pending PDF for a customer.
+
+    Renders the "Customer Bill-wise Pending" print format of the Accounts
+    Receivable report, so the WhatsApp PDF matches the on-screen report.
+    """
     original_user = frappe.session.user
     try:
         frappe.set_user(employee_user_id)
 
-        company = frappe.db.get_single_value("Global Defaults", "default_company")
-        today = frappe.utils.today()
-        today_date = frappe.utils.getdate(today)
-
-        rows_raw = frappe.db.sql("""
-            SELECT si.name, si.posting_date, si.due_date, si.grand_total,
-                   si.outstanding_amount, si.customer_name
-            FROM `tabSales Invoice` si
-            WHERE si.customer = %s
-              AND si.docstatus = 1
-              AND si.outstanding_amount > 0
-            ORDER BY si.posting_date ASC
-        """, (customer_name,), as_dict=True)
-
-        rows = []
-        for r in rows_raw:
-            age_days = frappe.utils.date_diff(today_date, frappe.utils.getdate(r.due_date)) if r.due_date else 0
-            rows.append(frappe._dict({
-                "bill_no": r.name,
-                "bill_date": r.posting_date,
-                "outstanding_amount": r.outstanding_amount,
-                "age_days": age_days,
-            }))
-
-        if not rows:
-            _send_text(reply_to, f"No outstanding invoices found for {customer_display or customer_name}.")
-            return
-
         display_name = customer_display or customer_name
-        html = _render_ap_html(display_name, company, today, rows, party_label="Customer", report_title="Accounts Receivable")
 
-        from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
-        pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
+        from kreativ_notification.notification.pdf_utils import render_report_print_format_pdf
+
+        pdf_bytes = None
+        try:
+            pdf_bytes = render_report_print_format_pdf(
+                ACCOUNTS_RECEIVABLE_REPORT,
+                CUSTOMER_BILL_WISE_PRINT_FORMAT,
+                _outstanding_report_filters(customer_name),
+                channel_name="WhatsApp - OpenWA",
+            )
+        except Exception:
+            frappe.log_error(
+                title="Bill-wise pending print format failed",
+                message=frappe.get_traceback(),
+            )
+
+        if not pdf_bytes:
+            # fall back to the invoice-derived report if the print format is unusable
+            try:
+                pdf_bytes = _outstanding_pdf_from_invoices(customer_name)
+            except Exception:
+                frappe.log_error(
+                    title="Outstanding PDF fallback failed",
+                    message=frappe.get_traceback(),
+                )
+
+        if not pdf_bytes:
+            _send_text(reply_to, f"No outstanding invoices found for {display_name}.")
+            return
 
         b64 = base64.b64encode(pdf_bytes).decode("utf-8")
         filename = f"Outstanding_{customer_name}.pdf"

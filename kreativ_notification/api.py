@@ -980,40 +980,27 @@ def get_customer_ledger_pdf(customer: str) -> dict:
 @frappe.whitelist()
 def get_customer_outstanding_pdf(customer: str) -> dict:
     """Generate and return Account Receivable (outstanding) PDF as base64 for remote fetch.
-    Uses Sales Invoice.outstanding_amount for accurate outstanding + aging."""
-    from kreativ_notification.notification.pdf_utils import generate_pdf_from_html
-    from kreativ_notification.notification.inbound import _render_ap_html
+
+    Renders the "Customer Bill-wise Pending" print format of the Accounts
+    Receivable report, so the PDF matches the on-screen report."""
+    from kreativ_notification.notification.pdf_utils import render_report_print_format_pdf
+    from kreativ_notification.notification.inbound import (
+        _outstanding_report_filters,
+        ACCOUNTS_RECEIVABLE_REPORT,
+        CUSTOMER_BILL_WISE_PRINT_FORMAT,
+    )
     import base64
 
-    company = frappe.db.get_single_value("Global Defaults", "default_company")
-    today = frappe.utils.today()
-    today_date = frappe.utils.getdate(today)
+    pdf_bytes = render_report_print_format_pdf(
+        ACCOUNTS_RECEIVABLE_REPORT,
+        CUSTOMER_BILL_WISE_PRINT_FORMAT,
+        _outstanding_report_filters(customer),
+        channel_name="WhatsApp - OpenWA",
+    )
 
-    rows_raw = frappe.db.sql("""
-        SELECT si.name, si.posting_date, si.due_date, si.grand_total,
-               si.outstanding_amount, si.customer_name
-        FROM `tabSales Invoice` si
-        WHERE si.customer = %s
-          AND si.docstatus = 1
-          AND si.outstanding_amount > 0
-        ORDER BY si.posting_date ASC
-    """, (customer,), as_dict=True)
-
-    rows = []
-    for r in rows_raw:
-        age_days = frappe.utils.date_diff(today_date, frappe.utils.getdate(r.due_date)) if r.due_date else 0
-        rows.append(frappe._dict({
-            "bill_no": r.name,
-            "bill_date": r.posting_date,
-            "outstanding_amount": r.outstanding_amount,
-            "age_days": age_days,
-        }))
-
-    if not rows:
+    if not pdf_bytes:
         return {"success": False, "error": f"No outstanding invoices found for {customer}"}
 
-    html = _render_ap_html(customer, company, today, rows, party_label="Customer", report_title="Accounts Receivable")
-    pdf_bytes = generate_pdf_from_html(html, channel_name="WhatsApp - OpenWA")
     base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
     return {"success": True, "pdf_base64": base64_pdf, "filename": f"Outstanding_{customer}.pdf"}

@@ -63,6 +63,55 @@ def generate_pdf_bytes(doctype: str, name: str, print_format: str = None, channe
     return _generate_pdf_from_html(html, channel_name)
 
 
+def render_report_print_format_pdf(
+    report_name: str,
+    print_format: str,
+    filters: dict,
+    channel_name: str = None,
+    no_letterhead: bool = 1,
+    require_field: str = "outstanding",
+) -> bytes | None:
+    """Run a report server-side, render its Jinja print format and return PDF bytes.
+
+    Mirrors frappe.utils.print_format.download_report_pdf() but keeps the PDF in
+    memory instead of sending it to the browser.
+
+    Returns None when the report has nothing to show (no row with a non-zero
+    `require_field`), so callers can fall back to a plain text reply.
+    """
+    from frappe.desk.query_report import run
+    from frappe.utils.print_format import render_report_jinja
+
+    data = run(
+        report_name,
+        filters,
+        ignore_prepared_report=True,
+        are_default_filters=False,
+    )
+
+    rows = list(data.get("result") or [])
+
+    # the report appends its own totals row; print formats render their own total
+    if rows and frappe.utils.cint(data.get("add_total_row")):
+        rows.pop()
+
+    if require_field:
+        rows = [row for row in rows if frappe.utils.flt(row.get(require_field))]
+
+    if not rows:
+        return None
+
+    rendered = render_report_jinja(
+        print_format,
+        data=rows,
+        columns=data.get("columns") or [],
+        filters=filters,
+        no_letterhead=no_letterhead,
+    )
+
+    return generate_pdf_from_html(rendered["body"], channel_name=channel_name)
+
+
 def generate_pdf_from_html(html: str, channel_name: str = None) -> bytes:
     """Generate PDF from HTML string using headless Chromium.
 
